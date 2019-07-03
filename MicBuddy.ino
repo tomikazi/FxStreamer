@@ -10,6 +10,8 @@
 #define PIR_PIN          5
 
 WiFiUDP UDP;
+
+// TODO: Make configurable
 IPAddress dest(192,168,1,148);
 
 #define MAX_SAMPLES     8
@@ -17,6 +19,11 @@ typedef struct {
     uint16_t count;
     uint16_t data[MAX_SAMPLES];
 } Sample;
+
+// For moving average for the N most recent samples used to normalize the input signal.
+#define N   256
+uint32_t mat = 600 * N;
+uint16_t cutoff = 10;
 
 Sample sample;
 
@@ -38,7 +45,12 @@ void finishWiFiConnect() {
 }
 
 void handleMic() {
-    sample.data[sample.count] = analogRead(MIC_PIN);
+    uint16_t v = analogRead(MIC_PIN);
+
+    mat = mat + v - (mat >> 8);
+    uint16_t av = abs(v - (mat >> 8));
+
+    sample.data[sample.count] = av > cutoff ? av : 0;
     sample.count++;
 
     if (sample.count == MAX_SAMPLES) {
@@ -47,7 +59,7 @@ void handleMic() {
         UDP.endPacket();
 
         for (int i = 0; i < sample.count; i++) {
-            Serial.printf("200, 300, %d\n", sample.data[i]);
+            Serial.printf("100, %d\n", sample.data[i]);
         }
 
         sample.count = 0;
