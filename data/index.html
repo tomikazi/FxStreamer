@@ -1,0 +1,390 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <link rel="apple-touch-icon" href="app.png">
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+
+
+    <script src="jquery.js"></script>
+    <title>LED Lamp</title>
+
+    <script>
+        $(document).ready(function () {
+            let canvas = document.getElementById('picker');
+            let ctx = canvas.getContext('2d');
+            let ws, lastHeard;
+
+            let image = new Image();
+            image.onload = function () {
+                ctx.drawImage(image, 0, 0, image.width, image.height);
+            };
+            image.src = "colorpicker.png";
+
+            function process(d) {
+                let b = $('.led-selector #back').prop('checked');
+                $('.switch input').prop('checked', b ? d.back.on : d.front.on);
+                $('#brightness').prop('value', b ? d.back.brightness : d.front.brightness);
+                $('#effect').prop('value', b ? d.back.effect : d.front.effect);
+                $('#version').html(d.version);
+            }
+
+            function send(t, m) {
+                if (ws && ws.readyState === 1) {
+                    let f = $('.led-selector #front').prop('checked');
+                    let b = $('.led-selector #back').prop('checked');
+                    let cmd = t === "get" ? "get" : f ? ("/front" + t) : (b ? ("/back" + t) : ("/all" + t));
+                    ws.send(cmd + "&" + m);
+                }
+            }
+
+            function markLive(on) {
+                $('#error').html(on ? '' : 'Disconnected');
+            }
+
+            function startWebSocket() {
+                lastHeard = new Date().getTime();
+                let port = location.port ? (parseInt(location.port) + 1) : 81;
+                ws = new WebSocket('ws://' + location.hostname + ':' + port + '/', ['arduino']);
+                console.log('Starting WebSocket', ws);
+
+                ws.onopen = function () {
+                    console.log('WebSocket connected');
+                    markLive(true);
+                    send("get", "status");
+                };
+
+                ws.onerror = function (error) {
+                    connectionLost('WebSocket error ' + error);
+                };
+
+                ws.onmessage = function (e) {
+                    markLive(true);
+                    lastHeard = new Date().getTime();
+                    let d = JSON.parse(e.data);
+                    console.log('Got message', d);
+                    if (d.version) {
+                        process(d);
+                    }
+                };
+            }
+
+            function checkWebSocket() {
+                if (lastHeard < new Date().getTime() - 5000) {
+                    if (ws && ws.readyState !== 0) {
+                        connectionLost('WebSocket went stale...');
+                        markLive(false);
+                        ws.close();
+                        startWebSocket();
+                    }
+                } else if (ws && ws.readyState === 1) {
+                    send("get", "status");
+                }
+            }
+
+            function connectionLost(m) {
+                console.log(m || 'Connection error');
+                markLive(false);
+            }
+
+            $('#picker').click(function (e) {
+                let canvasOffset = $(canvas).offset();
+                let canvasX = Math.floor(e.pageX - canvasOffset.left);
+                let canvasY = Math.floor(e.pageY - canvasOffset.top);
+
+                let imageData = ctx.getImageData(canvasX, canvasY, 1, 1);
+                let pixel = imageData.data;
+                let pixelColor = pixel[0] + "," + pixel[1] + "," + pixel[2];
+                if (pixelColor === '0,0,0') {
+                    pixelColor = '255,255,255';
+                }
+                $('.preview').css('backgroundColor', pixelColor);
+
+                console.log('Color: ' + pixelColor);
+                send("/rgb", pixelColor);
+            });
+
+            $('.switch input').click(function (e) {
+                 let on = $('.switch input').prop('checked');
+                 send("", on ? "on" : "off");
+                console.log(on ? 'Turned on' : 'Turned off');
+
+                let bc = $('#brightness');
+                if (on && bc.prop('value') === '0') {
+                    bc.prop('value', '64');
+                    send("/brightness", bc.prop('value'));
+                }
+            });
+
+            $('#brightness').change(function (e) {
+                let b = this.value;
+                send("/brightness", b);
+                console.log('Brightness: ', b);
+            });
+
+            $('#effect').change(function (e) {
+                let f = this.value;
+                send("/effect", f);
+                console.log('Effect: ', f);
+            });
+
+            $('.led-selector input').change(function (e) {
+                $('.led-selector label').css('background', '#ccc');
+                $('label[for="' + $(this).attr('id') + '"]').css('background', '#2196F3');
+                send("get", "status");
+            });
+
+            $('label[for="front"]').css('background', '#2196F3');
+
+            startWebSocket();
+            setInterval(checkWebSocket, 3000);
+        });
+    </script>
+
+    <style>
+        body {
+            margin: 0px;
+            background: #444;
+            font-family: Arial, Helvetica, Sans-Serif, serif;
+        }
+        .ui-content {
+            text-align: center;
+        }
+
+        #error {
+            position: relative;
+            display: inline-block;
+            width: 300px;
+            height: 32px;
+            padding: 8px 8px 0px 8px;
+            background-color: #444;
+            color: #ffaf00;
+            font-size: 18px;
+        }
+
+
+        .led-selector {
+            position: relative;
+            display: inline-block;
+            min-width: 300px;
+            width: 300px;
+            height: 32px;
+        }
+
+        .led-selector label:first-of-type {
+            border-radius: 8px 0px 0px 8px;
+        }
+
+        .led-selector label:last-of-type {
+            border-radius: 0px 8px 8px 0px;
+        }
+
+        .led-selector input {
+            display: none;
+        }
+
+        .led-selector label {
+            font-family: Arial, Helvetica, Sans-Serif, serif;
+            display: inline-block;
+            background: #ccc;
+            border: 0px;
+            padding: 10px;
+            min-width: 80px;
+        }
+
+
+        .switch {
+            position: relative;
+            display: inline-block;
+            width: 100px;
+            height: 40px;
+            margin: 16px;
+        }
+
+        .switch input {
+            opacity: 0;
+            width: 0;
+            height: 0;
+        }
+
+        .slider {
+            position: absolute;
+            cursor: pointer;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background-color: #ccc;
+            -webkit-transition: .4s;
+            transition: .2s;
+        }
+
+        .slider:before {
+            position: absolute;
+            content: "";
+            height: 32px;
+            width: 32px;
+            left: 4px;
+            bottom: 4px;
+            background-color: white;
+            -webkit-transition: .4s;
+            transition: .2s;
+        }
+
+        input:checked + .slider {
+            background-color: #2196F3;
+        }
+
+        input:focus + .slider {
+            box-shadow: 0 0 1px #2196F3;
+        }
+
+        input:checked + .slider:before {
+            -webkit-transform: translateX(60px);
+            -ms-transform: translateX(60px);
+            transform: translateX(60px);
+        }
+
+        .slider.round {
+            border-radius: 34px;
+        }
+
+        .slider.round:before {
+            border-radius: 50%;
+        }
+
+
+        .brightnesscontainer {
+            position: relative;
+            display: inline-block;
+            width: 300px;
+        }
+
+        .brightness {
+            -webkit-appearance: none;
+            width: 300px;
+            height: 6px;
+            border-radius: 5px;
+            background: #ccc;
+            outline: none;
+            opacity: 0.7;
+            -webkit-transition: .2s;
+            transition: opacity .2s;
+            margin: 16px 0px;
+        }
+
+        .brightness::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            appearance: none;
+            width: 25px;
+            height: 25px;
+            border-radius: 50%;
+            background: #2196F3;
+            cursor: pointer;
+        }
+
+        .brightness::-moz-range-thumb {
+            width: 25px;
+            height: 25px;
+            border-radius: 50%;
+            background: #2196F3;
+            cursor: pointer;
+        }
+
+
+        .effectcontainer {
+            position: relative;
+            display: inline-block;
+            border: 0px;
+            border-radius: 8px;
+            background: #ccc;
+            overflow:hidden;
+        }
+
+        .effectcontainer select {
+            -webkit-border-radius: 8px;
+            font-size: 18px;
+            background: #ccc;
+            border: 0px;
+            width: 300px;
+            height: 40px;
+            outline: none;
+        }
+
+
+        #settings {
+            margin: 64px 16px 16px 16px;
+        }
+
+        #version {
+            font-style: italic;
+            color: #aaa;
+        }
+    </style>
+</head>
+<body>
+    <div data-role="main" class="ui-content">
+        <p>
+        <div id="error"></div>
+        <p>
+        <div class="led-selector">
+            <label for="all">All</label><label for="front">Front</label><label for="back">Back</label>
+            <input type="radio" class="stv-radio-button" name="led" value="all" id="all" />
+            <input type="radio" class="stv-radio-button" name="led" value="front" id="front" checked/>
+            <input type="radio" class="stv-radio-button" name="led" value="back" id="back" />
+        </div>
+        <p>
+        <div>
+            <label class="switch">
+                <input type="checkbox">
+                <span class="slider round"></span>
+            </label>
+        </div>
+        <p>
+        <canvas id="picker" var="1" width="290" height="290"></canvas>
+        <p>
+        <div class="brightnesscontainer">
+            <input type="range" min="0" max="255" value="0" class="brightness" id="brightness">
+        </div>
+        <p>
+        <div class="effectcontainer">
+            <select id="effect">
+                <option value="none" selected>-- Select Effect --</option>
+                <option value="random">All Effects</option>
+                <option value="soundReactive">All Sound Reactive Effects</option>
+                <option value="notSoundReactive">All Non-Sound Reactive Effects</option>
+                <option value="pixel">Pixel *</option>
+                <option value="pixels">Pixels *</option>
+                <option value="ripple">Ripple *</option>
+                <option value="matrix">Matrix *</option>
+                <option value="onesine">One Sine *</option>
+                <option value="noisefire">Noise Fire *</option>
+                <option value="noisepal">Noise Split Fire *</option>
+                <option value="rainbowg">Rainbow Glitter *</option>
+                <option value="besin">Besin *</option>
+                <option value="fillnoise">Fill Noise *</option>
+                <option value="plasmasr">Plasma *</option>
+                <option value="glitter">Glitter</option>
+                <option value="confetti">Confetti</option>
+                <option value="cycle">Slow Cycle</option>
+                <option value="fire">Fire</option>
+                <option value="noise">Noise</option>
+                <option value="blendwave">Blend Wave</option>
+                <option value="dotbeat">Dot Beat</option>
+                <option value="plasma">Plasma</option>
+                <option value="bpm">Beats</option>
+                <option value="juggle">Juggle</option>
+                <option value="sinelon">Particle</option>
+                <option value="rainbow">Rainbow</option>
+                <option value="rainbowWithGlitter">Rainbbow with Glitter</option>
+                <option value="solid">Solid Color</option>
+                <option value="test">Test Pattern</option>
+            </select>
+        </div>
+        <p>
+        <div id="settings"><a href="/nets" border="0"><img src="gears.png"/></a></div>
+        <div id="version">2019.05.15.001</div>
+    </div>
+</body>
+</html>
+
