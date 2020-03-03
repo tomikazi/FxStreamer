@@ -116,19 +116,22 @@ void handleMulticast() {
     }
 }
 
+uint16_t minv = 4;
+uint16_t maxv = 128;
+
 void handleMic() {
     uint16_t v = analogRead(MIC_PIN);
 
     mat = mat + v - (mat >> 8);
     uint16_t av = abs(v - (mat >> 8));
 
-    if (av < 4) {
+    if (av < minv) {
         av = 0;
-    } else if (av > 128) {
-        av = 128;
+    } else if (av > maxv) {
+        av = maxv;
     }
 
-    av = map(av, 0, 128, 0, 255);
+    av = map(av, 0, maxv, 0, 255);
     nmat = nmat + av - (nmat >> 4);
     sampleavg = nmat >> 4;
 
@@ -157,7 +160,7 @@ void handleMic() {
     }
 
     if (sampling) {
-//        Serial.printf("255, %d, %d, %d\n", av, sampleavg, samplepeak * 200);
+        Serial.printf("255, %d, %d, %d\n", av, sampleavg, samplepeak * 200);
     }
 
     delay(5);
