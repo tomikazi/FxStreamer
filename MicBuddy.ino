@@ -4,7 +4,7 @@
 
 #define MIC_BUDDY      "MicBuddy"
 #define SW_UPDATE_URL   "http://iot.vachuska.com/MicBuddy.ino.bin"
-#define SW_VERSION      "2020.03.02.005"
+#define SW_VERSION      "2020.03.02.008"
 
 #define MIC_PIN         A0
 #define PIR_PIN          5
@@ -17,8 +17,9 @@ WiFiUDP buddy;
 
 IPAddress buddyIp(224,0,42,69);
 
-IPAddress lamp1(192,168,0,15);
-IPAddress lamp2(192,168,0,25);
+#define MAX_LAMPS   4
+uint32_t lampIps[MAX_LAMPS];
+uint32_t lampTimes[MAX_LAMPS];
 
 typedef struct {
     uint16_t sampleavg;
@@ -26,12 +27,13 @@ typedef struct {
     uint16_t oldsample;
 } MicSample;
 
-#define SAMPLING_REMINDER   30000
+#define SAMPLING_REMINDER   10000
 #define SAMPLE  100
 
 typedef struct {
     uint16_t op;
     uint16_t param;
+    uint32_t src;
 } Command;
 
 // For moving averages
@@ -43,9 +45,6 @@ uint16_t sampleavg = 0;
 uint16_t oldsample = 0;
 uint16_t samplepeak = 0;
 
-boolean sampling = false;
-uint32_t lastReminder = 0;
-
 void setup() {
     gizmo.beginSetup(MIC_BUDDY, SW_VERSION, "gizmo123");
     gizmo.setUpdateURL(SW_UPDATE_URL);
@@ -54,7 +53,7 @@ void setup() {
 
 void loop() {
     if (gizmo.isNetworkAvailable(finishWiFiConnect)) {
-        handleCommand();
+        handleMulticast();
         handleMic();
     }
 }
@@ -65,7 +64,37 @@ void finishWiFiConnect() {
     Serial.printf("%s is ready\n", MIC_BUDDY);
 }
 
-void handleCommand() {
+void addLamp(uint32_t ip) {
+    int ai = -1;
+    for (int i = 0; i < MAX_LAMPS; i++) {
+        if (ip == lampIps[i]) {
+            lampTimes[i] = millis() + SAMPLING_REMINDER;
+            return;
+        }
+        if (ai < 0 && !lampIps[i]) {
+            ai = i;
+        }
+    }
+    if (ai >= 0) {
+        lampIps[ai] = ip;
+        lampTimes[ai] = millis() + SAMPLING_REMINDER;
+        Serial.printf("Lamp %s added\n", IPAddress(ip).toString().c_str());
+    }
+}
+
+void removeLamp(uint32_t  ip) {
+    for (int i = 0; i < MAX_LAMPS; i++) {
+        if (ip == lampIps[i]) {
+            lampIps[i] = 0;
+            lampTimes[i] = 0;
+            Serial.printf("Lamp %s removed\n", IPAddress(ip).toString().c_str());
+            return;
+        }
+    }
+}
+
+
+void handleMulticast() {
     Command command;
     while (buddy.parsePacket()) {
         int len = buddy.read((char *) &command, sizeof(command));
@@ -75,20 +104,15 @@ void handleCommand() {
 
         switch (command.op) {
             case SAMPLE:
-                sampling = command.param != 0;
-                lastReminder = millis() + SAMPLING_REMINDER;
-                Serial.printf("Sampling is %s\n", sampling ? "on" : "off");
+                if (command.param) {
+                    addLamp(command.src);
+                } else {
+                    removeLamp(command.src);
+                }
                 break;
             default:
                 break;
         }
-    }
-
-    if (lastReminder && lastReminder < millis()) {
-        // Process aged out sampling requests
-        sampling = false;
-        lastReminder = 0;
-        Serial.printf("Sampling timed out\n");
     }
 }
 
@@ -112,21 +136,28 @@ void handleMic() {
     samplepeak = av > (sampleavg + 16) && (av < oldsample);
     oldsample = av;
 
+    MicSample sample;
+    sample.sampleavg = sampleavg;
+    sample.samplepeak = samplepeak;
+    sample.oldsample = oldsample;
+
+    uint32_t now = millis();
+    boolean sampling = false;
+    for (int i = 0; i < MAX_LAMPS; i++) {
+        if (lampIps[i] && lampTimes[i] >= now) {
+            udp.beginPacket(IPAddress(lampIps[i]), GROUP_PORT);
+            udp.write((char *) &sample, sizeof(sample));
+            udp.endPacket();
+            sampling = true;
+        } else if (lampTimes[i] && lampTimes[i] < now) {
+            Serial.printf("Lamp %s timed out\n", IPAddress(lampIps[i]).toString().c_str());
+            lampIps[i] = 0;
+            lampTimes[i] = 0;
+        }
+    }
+
     if (sampling) {
-        MicSample sample;
-        sample.sampleavg = sampleavg;
-        sample.samplepeak = samplepeak;
-        sample.oldsample = oldsample;
-
-        udp.beginPacket(lamp1, GROUP_PORT);
-        udp.write((char *) &sample, sizeof(sample));
-        udp.endPacket();
-
-        udp.beginPacket(lamp2, GROUP_PORT);
-        udp.write((char *) &sample, sizeof(sample));
-        udp.endPacket();
-
-        Serial.printf("255, %d, %d, %d\n", av, sampleavg, samplepeak * 200);
+//        Serial.printf("255, %d, %d, %d\n", av, sampleavg, samplepeak * 200);
     }
 
     delay(5);
