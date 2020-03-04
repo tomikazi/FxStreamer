@@ -4,7 +4,7 @@
 
 #define MIC_BUDDY      "MicBuddy"
 #define SW_UPDATE_URL   "http://iot.vachuska.com/MicBuddy.ino.bin"
-#define SW_VERSION      "2020.03.03.003"
+#define SW_VERSION      "2020.03.03.004"
 
 #define MIC_PIN         A0
 #define PIR_PIN          5
@@ -41,7 +41,7 @@ typedef struct {
     uint8_t  data[MAX_CMD_DATA];
 } Command;
 
-
+#define AD_FREQUENCY     3000
 #define HELLO_TIMEOUT   10000
 
 // For moving averages
@@ -53,6 +53,8 @@ uint16_t sampleavg = 0;
 uint16_t oldsample = 0;
 uint16_t samplepeak = 0;
 
+uint32_t lastAdvertisement = 0;
+
 void setup() {
     gizmo.beginSetup(MIC_BUDDY, SW_VERSION, "gizmo123");
     gizmo.setUpdateURL(SW_UPDATE_URL);
@@ -63,6 +65,7 @@ void loop() {
     if (gizmo.isNetworkAvailable(finishWiFiConnect)) {
         handleMulticast();
         handleMic();
+        handleAdvertisement();
     }
 }
 
@@ -71,6 +74,13 @@ void finishWiFiConnect() {
     group.beginMulticast(WiFi.localIP(), groupIp, GROUP_PORT);
     advertise();
     Serial.printf("%s is ready\n", MIC_BUDDY);
+}
+
+void handleAdvertisement() {
+    if (lastAdvertisement < millis()) {
+        lastAdvertisement = millis() + AD_FREQUENCY;
+        advertise();
+    }
 }
 
 void advertise() {
@@ -85,7 +95,6 @@ void addLamp(uint32_t ip) {
     for (int i = 0; i < MAX_LAMPS; i++) {
         if (ip == lampIps[i]) {
             lampTimes[i] = millis() + HELLO_TIMEOUT;
-            advertise();
             return;
         }
         if (ai < 0 && !lampIps[i]) {
