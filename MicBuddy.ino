@@ -4,18 +4,17 @@
 
 #define MIC_BUDDY      "MicBuddy"
 #define SW_UPDATE_URL   "http://iot.vachuska.com/MicBuddy.ino.bin"
-#define SW_VERSION      "2020.03.03.001"
+#define SW_VERSION      "2020.03.03.003"
 
 #define MIC_PIN         A0
 #define PIR_PIN          5
 
-#define GROUP_PORT  7001
-#define BUDDY_PORT  7002
-
-WiFiUDP udp;
+#define BUDDY_PORT  7001
 WiFiUDP buddy;
 
-IPAddress buddyIp(224,0,42,69);
+#define GROUP_PORT  7002
+WiFiUDP group;
+IPAddress groupIp(224, 0, 42, 69);
 
 #define MAX_LAMPS   4
 uint32_t lampIps[MAX_LAMPS];
@@ -32,6 +31,7 @@ typedef struct {
 #define ALL_CTX         FRONT_CTX | BACK_CTX
 
 #define SAMPLE_REQ      100
+#define SAMPLE_ADV      101
 
 #define MAX_CMD_DATA    64
 typedef struct {
@@ -42,7 +42,7 @@ typedef struct {
 } Command;
 
 
-#define LAMP_TIMEOUT   10000
+#define HELLO_TIMEOUT   10000
 
 // For moving averages
 uint32_t mat = 0;
@@ -67,16 +67,25 @@ void loop() {
 }
 
 void finishWiFiConnect() {
-    udp.begin(GROUP_PORT);
-    buddy.beginMulticast(WiFi.localIP(), buddyIp, BUDDY_PORT);
+    buddy.begin(BUDDY_PORT);
+    group.beginMulticast(WiFi.localIP(), groupIp, GROUP_PORT);
+    advertise();
     Serial.printf("%s is ready\n", MIC_BUDDY);
+}
+
+void advertise() {
+    Command ad = { .src = (uint) WiFi.localIP(), .ctx = ALL_CTX, .op = SAMPLE_ADV, .data = { [0] = 0}};
+    group.beginPacketMulticast(groupIp, GROUP_PORT, WiFi.localIP());
+    group.write((char *) &ad, sizeof(ad));
+    group.endPacket();
 }
 
 void addLamp(uint32_t ip) {
     int ai = -1;
     for (int i = 0; i < MAX_LAMPS; i++) {
         if (ip == lampIps[i]) {
-            lampTimes[i] = millis() + LAMP_TIMEOUT;
+            lampTimes[i] = millis() + HELLO_TIMEOUT;
+            advertise();
             return;
         }
         if (ai < 0 && !lampIps[i]) {
@@ -85,7 +94,8 @@ void addLamp(uint32_t ip) {
     }
     if (ai >= 0) {
         lampIps[ai] = ip;
-        lampTimes[ai] = millis() + LAMP_TIMEOUT;
+        lampTimes[ai] = millis() + HELLO_TIMEOUT;
+        advertise();
         Serial.printf("Lamp %s added\n", IPAddress(ip).toString().c_str());
     }
 }
@@ -104,8 +114,8 @@ void removeLamp(uint32_t  ip) {
 
 void handleMulticast() {
     Command command;
-    while (buddy.parsePacket()) {
-        int len = buddy.read((char *) &command, sizeof(command));
+    while (group.parsePacket()) {
+        int len = group.read((char *) &command, sizeof(command));
         if (len < 0) {
             Serial.printf("Unable to read command!!!!\n");
         }
@@ -156,9 +166,9 @@ void handleMic() {
     boolean sampling = false;
     for (int i = 0; i < MAX_LAMPS; i++) {
         if (lampIps[i] && lampTimes[i] >= now) {
-            udp.beginPacket(IPAddress(lampIps[i]), GROUP_PORT);
-            udp.write((char *) &sample, sizeof(sample));
-            udp.endPacket();
+            buddy.beginPacket(IPAddress(lampIps[i]), BUDDY_PORT);
+            buddy.write((char *) &sample, sizeof(sample));
+            buddy.endPacket();
             sampling = true;
         } else if (lampTimes[i] && lampTimes[i] < now) {
             Serial.printf("Lamp %s timed out\n", IPAddress(lampIps[i]).toString().c_str());
