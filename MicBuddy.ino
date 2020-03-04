@@ -4,7 +4,7 @@
 
 #define MIC_BUDDY      "MicBuddy"
 #define SW_UPDATE_URL   "http://iot.vachuska.com/MicBuddy.ino.bin"
-#define SW_VERSION      "2020.03.02.008"
+#define SW_VERSION      "2020.03.03.001"
 
 #define MIC_PIN         A0
 #define PIR_PIN          5
@@ -27,14 +27,22 @@ typedef struct {
     uint16_t oldsample;
 } MicSample;
 
-#define SAMPLING_REMINDER   10000
-#define SAMPLE  100
+#define FRONT_CTX       0x01
+#define BACK_CTX        0x10
+#define ALL_CTX         FRONT_CTX | BACK_CTX
 
+#define SAMPLE_REQ      100
+
+#define MAX_CMD_DATA    64
 typedef struct {
-    uint16_t op;
-    uint16_t param;
     uint32_t src;
+    uint16_t ctx;
+    uint16_t op;
+    uint8_t  data[MAX_CMD_DATA];
 } Command;
+
+
+#define LAMP_TIMEOUT   10000
 
 // For moving averages
 uint32_t mat = 0;
@@ -68,7 +76,7 @@ void addLamp(uint32_t ip) {
     int ai = -1;
     for (int i = 0; i < MAX_LAMPS; i++) {
         if (ip == lampIps[i]) {
-            lampTimes[i] = millis() + SAMPLING_REMINDER;
+            lampTimes[i] = millis() + LAMP_TIMEOUT;
             return;
         }
         if (ai < 0 && !lampIps[i]) {
@@ -77,7 +85,7 @@ void addLamp(uint32_t ip) {
     }
     if (ai >= 0) {
         lampIps[ai] = ip;
-        lampTimes[ai] = millis() + SAMPLING_REMINDER;
+        lampTimes[ai] = millis() + LAMP_TIMEOUT;
         Serial.printf("Lamp %s added\n", IPAddress(ip).toString().c_str());
     }
 }
@@ -103,8 +111,8 @@ void handleMulticast() {
         }
 
         switch (command.op) {
-            case SAMPLE:
-                if (command.param) {
+            case SAMPLE_REQ:
+                if (command.data[0]) {
                     addLamp(command.src);
                 } else {
                     removeLamp(command.src);
