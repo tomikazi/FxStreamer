@@ -6,7 +6,7 @@
 
 #define MIC_BUDDY      "MicBuddy"
 #define SW_UPDATE_URL   "http://iot.vachuska.com/MicBuddy.ino.bin"
-#define SW_VERSION      "2020.03.04.001"
+#define SW_VERSION      "2020.03.04.002"
 
 #define STATE      "/cfg/state"
 
@@ -47,7 +47,7 @@ typedef struct {
 } Command;
 
 #define AD_FREQUENCY     3000
-#define HELLO_TIMEOUT   10000
+#define HELLO_TIMEOUT   15000
 
 // For moving averages
 uint32_t mat = 0;
@@ -62,7 +62,8 @@ uint16_t samplepeak = 0;
 uint16_t minv, maxv;
 uint8_t n1, n2, peakdelta;
 
-uint32_t lastAdvertisement = 0;
+uint32_t nextAdvertisement = 0;
+uint32_t nextSample = 0;
 boolean sampling = false;
 
 static WebSocketsServer wsServer(81);
@@ -181,8 +182,8 @@ void processCallback(char *topic, char *value) {
 }
 
 void handleAdvertisement() {
-    if (lastAdvertisement < millis()) {
-        lastAdvertisement = millis() + AD_FREQUENCY;
+    if (nextAdvertisement < millis()) {
+        nextAdvertisement = millis() + AD_FREQUENCY;
         advertise();
     }
 }
@@ -297,57 +298,59 @@ void saveState() {
 
 
 void handleMic() {
-    uint16_t v = analogRead(MIC_PIN);
+    if (nextSample < millis()) {
+        nextSample = millis() + 5;
 
-    mat = mat + v - (mat >> n1);
-    baseavg = mat >> n1;
-    uint16_t av = abs(v - baseavg);
+        uint16_t v = analogRead(MIC_PIN);
 
-    if (av < minv) {
-        av = 0;
-    } else if (av > maxv) {
-        av = maxv;
-    }
+        mat = mat + v - (mat >> n1);
+        baseavg = mat >> n1;
+        uint16_t av = abs(v - baseavg);
 
-    av = map(av, 0, maxv, 0, 255);
+        if (av < minv) {
+            av = 0;
+        } else if (av > maxv) {
+            av = maxv;
+        }
 
-    // Allow n2 to be 0, which means sampleavg == av;
-    if (n2) {
-        nmat = nmat + av - (nmat >> n2);
-        sampleavg = nmat >> n2;
-    } else {
-        nmat = av;
-        sampleavg = av;
-    }
+        av = map(av, 0, maxv, 0, 255);
 
-    // We're on the down swing, so we just peaked.
-    samplepeak = av > (sampleavg + peakdelta) && (av < oldsample);
-    oldsample = av;
+        // Allow n2 to be 0, which means sampleavg == av;
+        if (n2) {
+            nmat = nmat + av - (nmat >> n2);
+            sampleavg = nmat >> n2;
+        } else {
+            nmat = av;
+            sampleavg = av;
+        }
 
-    MicSample sample;
-    sample.sampleavg = sampleavg;
-    sample.samplepeak = samplepeak;
-    sample.oldsample = oldsample;
+        // We're on the down swing, so we just peaked.
+        samplepeak = av > (sampleavg + peakdelta) && (av < oldsample);
+        oldsample = av;
 
-    uint32_t now = millis();
-    uint8_t count = 0;
-    for (int i = 0; i < MAX_LAMPS; i++) {
-        if (lampIps[i] && lampTimes[i] >= now) {
-            buddy.beginPacket(IPAddress(lampIps[i]), BUDDY_PORT);
-            buddy.write((char *) &sample, sizeof(sample));
-            buddy.endPacket();
-            count++;
-        } else if (lampTimes[i] && lampTimes[i] < now) {
-            Serial.printf("Lamp %s timed out\n", IPAddress(lampIps[i]).toString().c_str());
-            lampIps[i] = 0;
-            lampTimes[i] = 0;
+        MicSample sample;
+        sample.sampleavg = sampleavg;
+        sample.samplepeak = samplepeak;
+        sample.oldsample = oldsample;
+
+        uint32_t now = millis();
+        uint8_t count = 0;
+        for (int i = 0; i < MAX_LAMPS; i++) {
+            if (lampIps[i] && lampTimes[i] >= now) {
+                buddy.beginPacket(IPAddress(lampIps[i]), BUDDY_PORT);
+                buddy.write((char *) &sample, sizeof(sample));
+                buddy.endPacket();
+                count++;
+            } else if (lampTimes[i] && lampTimes[i] < now) {
+                Serial.printf("Lamp %s timed out\n", IPAddress(lampIps[i]).toString().c_str());
+                lampIps[i] = 0;
+                lampTimes[i] = 0;
+            }
+        }
+        lampCount = count;
+
+        if (lampCount) {
+            Serial.printf("255, %d, %d, %d, %d, %d\n", av, sampleavg, baseavg, samplepeak * 200, v);
         }
     }
-    lampCount = count;
-
-    if (lampCount) {
-        Serial.printf("255, %d, %d, %d, %d, %d\n", av, sampleavg, baseavg, samplepeak * 200, v);
-    }
-
-    delay(5);
 }
