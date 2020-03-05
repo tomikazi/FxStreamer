@@ -6,7 +6,7 @@
 
 #define MIC_BUDDY      "MicBuddy"
 #define SW_UPDATE_URL   "http://iot.vachuska.com/MicBuddy.ino.bin"
-#define SW_VERSION      "2020.03.04.002"
+#define SW_VERSION      "2020.03.05.001"
 
 #define STATE      "/cfg/state"
 
@@ -68,17 +68,11 @@ boolean sampling = false;
 
 static WebSocketsServer wsServer(81);
 
-#define OFFLINE_TIMEOUT     15000
-uint32_t offlineTime;
-
-
 void setup() {
     gizmo.beginSetup(MIC_BUDDY, SW_VERSION, "gizmo123");
     gizmo.setUpdateURL(SW_UPDATE_URL);
     gizmo.setCallback(defaultMqttCallback);
 
-    gizmo.httpServer()->on("/", handleRoot);
-    gizmo.httpServer()->serveStatic("/", SPIFFS, "/", "max-age=86400");
     setupWebSocket();
 
     setupSampler();
@@ -92,23 +86,7 @@ void loop() {
         handleMulticast();
         handleMic();
         handleAdvertisement();
-    } else {
-        handleNetworkFailover();
     }
-}
-
-void handleNetworkFailover() {
-    if (offlineTime && millis() > offlineTime) {
-        gizmo.setNoNetworkConfig();
-        finishWiFiConnect();
-    }
-}
-
-
-void handleRoot() {
-    File f = SPIFFS.open("/index.html", "r");
-    gizmo.httpServer()->streamFile(f, "text/html");
-    f.close();
 }
 
 void finishWiFiConnect() {
