@@ -63,6 +63,7 @@ uint16_t minv, maxv;
 uint8_t n1, n2, peakdelta;
 
 uint32_t lastAdvertisement = 0;
+boolean sampling = false;
 
 static WebSocketsServer wsServer(81);
 
@@ -157,22 +158,22 @@ void broadcastState() {
     char state[512];
     state[0] = '\0';
     snprintf(state, 511,
-             "{\"minv\": %u,\"maxv\": %u,\"n1\": %u,\"n2\": %u,\"peakdelta\": %u,\"lamps\": %u,\"version\":\"" SW_VERSION "\"}",
-             minv, maxv, n1, n2, peakdelta, lampCount);
+             "{\"minv\": %u,\"maxv\": %u,\"n1\": %u,\"n2\": %u,\"peakdelta\": %u,\"lamps\": %u,\"sampling\": %s, \"version\":\"" SW_VERSION "\"}",
+             minv, maxv, n1, n2, peakdelta, lampCount, lampCount ? "true" : "false");
     wsServer.broadcastTXT(state);
 }
 
 void processCallback(char *topic, char *value) {
     if (strstr(topic, "/minv")) {
-        minv = parse(value, 2, 32, 4);
+        minv = parse(value, 0, 16, 4);
     } else if (strstr(topic, "/maxv")) {
-        maxv = parse(value, 32, 192, 128);
+        maxv = parse(value, 8, 255, 128);
     } else if (strstr(topic, "/n1")) {
-        n1 = parse(value, 4, 12, 8);
+        n1 = parse(value, 2, 8, 4);
     } else if (strstr(topic, "/n2")) {
-        n2 = parse(value, 2, 8, 4);
+        n2 = parse(value, 0, 4, 2);
     } else if (strstr(topic, "/peakdelta")) {
-        peakdelta = parse(value, 8, 64, 16);
+        peakdelta = parse(value, 8, 96, 16);
     } else {
         setupSampler();
     }
@@ -249,8 +250,8 @@ void handleMulticast() {
 void setupSampler() {
     minv = 4;
     maxv = 128;
-    n1 = 8;
-    n2 = 4;
+    n1 = 4;
+    n2 = 2;
     peakdelta = 16;
 }
 
@@ -265,23 +266,23 @@ void loadState() {
         char field[32];
         int l = f.readBytesUntil('|', field, 7);
         field[l] = '\0';
-        minv = parse(field, 2, 32, 4);
+        minv = parse(field, 0, 16, 4);
 
         l = f.readBytesUntil('|', field, 7);
         field[l] = '\0';
-        maxv = parse(field, 32, 192, 128);
+        maxv = parse(field, 8, 255, 128);
 
         l = f.readBytesUntil('|', field, 7);
         field[l] = '\0';
-        n1 = parse(field, 4, 12, 8);
+        n1 = parse(field, 2, 8, 4);
 
         l = f.readBytesUntil('|', field, 7);
         field[l] = '\0';
-        n2 = parse(field, 2, 8, 4);
+        n2 = parse(field, 0, 4, 2);
 
         l = f.readBytesUntil('|', field, 7);
         field[l] = '\0';
-        peakdelta = parse(field, 8, 64, 16);
+        peakdelta = parse(field, 8, 96, 16);
         f.close();
     }
 }
@@ -309,8 +310,15 @@ void handleMic() {
     }
 
     av = map(av, 0, maxv, 0, 255);
-    nmat = nmat + av - (nmat >> n2);
-    sampleavg = nmat >> n2;
+
+    // Allow n2 to be 0, which means sampleavg == av;
+    if (n2) {
+        nmat = nmat + av - (nmat >> n2);
+        sampleavg = nmat >> n2;
+    } else {
+        nmat = av;
+        sampleavg = av;
+    }
 
     // We're on the down swing, so we just peaked.
     samplepeak = av > (sampleavg + peakdelta) && (av < oldsample);
@@ -322,7 +330,6 @@ void handleMic() {
     sample.oldsample = oldsample;
 
     uint32_t now = millis();
-    boolean sampling = false;
     uint8_t count = 0;
     for (int i = 0; i < MAX_LAMPS; i++) {
         if (lampIps[i] && lampTimes[i] >= now) {
@@ -330,7 +337,6 @@ void handleMic() {
             buddy.write((char *) &sample, sizeof(sample));
             buddy.endPacket();
             count++;
-            sampling = true;
         } else if (lampTimes[i] && lampTimes[i] < now) {
             Serial.printf("Lamp %s timed out\n", IPAddress(lampIps[i]).toString().c_str());
             lampIps[i] = 0;
@@ -339,7 +345,7 @@ void handleMic() {
     }
     lampCount = count;
 
-    if (sampling) {
+    if (lampCount) {
         Serial.printf("255, %d, %d, %d, %d, %d\n", av, sampleavg, baseavg, samplepeak * 200, v);
     }
 

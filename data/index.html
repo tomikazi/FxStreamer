@@ -23,6 +23,8 @@
                 set('n1', d.n1);
                 set('n2', d.n2);
                 set('peakdelta', d.peakdelta);
+                $('#streaming').html(d.lamps ? ('Streaming to ' + d.lamps + (d.lamps === 1 ? ' lamp' : ' lamps')) : 'Not Streaming');
+                $('#streaming').css('color', d.lamps ? '#00ffaf' : '#ffaf00');
                 $('#version').html(d.version);
             }
 
@@ -125,6 +127,11 @@
             font-size: 18px;
         }
 
+        #status {
+            color: #ccc;
+            font-size: 18px;
+        }
+
         .paramcontainer {
             position: relative;
             display: inline-block;
@@ -143,6 +150,16 @@
             -webkit-transition: .2s;
             transition: opacity .2s;
             margin: 16px 0px;
+        }
+
+        .advanced input {
+            width: 200px;
+            height: 4px;
+        }
+
+        .advanced input::-webkit-slider-thumb {
+            width: 16px;
+            height: 16px;
         }
 
         .param::-webkit-slider-thumb {
@@ -164,7 +181,7 @@
         }
 
         #reset {
-            font-size: 24px;
+            font-size: 16px;
         }
 
         .button {
@@ -177,7 +194,11 @@
             text-decoration: none;
             display: inline-block;
             font-size: 18px;
-            margin: 4px 2px;
+            margin: 24px 2px 8px 2px;
+        }
+
+        #volume {
+            margin: 24px 0px 36px 0px;
         }
 
         #settings {
@@ -195,31 +216,35 @@
         <p>
         <div id="error"></div>
         <p>
-        <div class="paramcontainer">
-            <span>Silence Threshold: </span><span class="value">4</span>
-            <input type="range" min="2" max="32" value="4" class="param" id="minv">
+        <div id="status">
+            <span id="streaming"></span>
         </div>
         <p>
-        <div class="paramcontainer">
-            <span>Loudness Threshold: </span><span class="value">128</span>
-            <input type="range" min="32" max="192" value="128" class="param" id="maxv">
+        <div class="paramcontainer" id="volume">
+            <span>Music Volume: </span><span class="value">128</span>
+            <input type="range" min="8" max="255" value="128" class="param" id="maxv">
         </div>
         <p>
-        <div class="paramcontainer">
+        <div class="paramcontainer advanced">
+            <span>Ambient Volume: </span><span class="value">4</span>
+            <input type="range" min="0" max="16" value="4" class="param" id="minv">
+        </div>
+        <p>
+        <div class="paramcontainer advanced">
             <span>Peak Delta: </span><span class="value">16</span>
-            <input type="range" min="8" max="64" value="16" class="param" id="peakdelta">
+            <input type="range" min="8" max="96" value="16" class="param" id="peakdelta">
         </div>
         <p>
-        <div class="paramcontainer">
-            <span>Baseline Stability: </span><span class="value">8</span>
-            <input type="range" min="4" max="12" value="8" class="param" id="n1">
+        <div class="paramcontainer advanced">
+            <span>Baseline Stability: </span><span class="value">4</span>
+            <input type="range" min="2" max="8" value="4" class="param" id="n1">
         </div>
         <p>
-        <div class="paramcontainer">
-            <span>Sample Stability: </span><span class="value">4</span>
-            <input type="range" min="2" max="8" value="4" class="param" id="n2">
+        <div class="paramcontainer advanced">
+            <span>Sample Stability: </span><span class="value">2</span>
+            <input type="range" min="0" max="4" value="2" class="param" id="n2">
         </div>
-        <p><br><p>
+        <p>
         <div>
             <button class="button" id="reset">Reset to Defaults</button>
         </div>
