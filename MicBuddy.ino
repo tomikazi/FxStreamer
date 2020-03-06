@@ -6,7 +6,7 @@
 
 #define MIC_BUDDY      "MicBuddy"
 #define SW_UPDATE_URL   "http://iot.vachuska.com/MicBuddy.ino.bin"
-#define SW_VERSION      "2020.03.05.001"
+#define SW_VERSION      "2020.03.05.002"
 
 #define STATE      "/cfg/state"
 
@@ -20,11 +20,16 @@ WiFiUDP buddy;
 WiFiUDP group;
 IPAddress groupIp(224, 0, 42, 69);
 
-#define MAX_LAMPS   4
-uint32_t lampIps[MAX_LAMPS];
-uint32_t lampTimes[MAX_LAMPS];
-boolean lampSampling[MAX_LAMPS];
-uint8_t lampCount = 0;
+#define MAX_PEERS   4
+typedef struct {
+    uint32_t ip;
+    uint32_t lastHeard;
+    boolean  sampling;
+    char name[64];
+} Peer;
+
+Peer peers[MAX_PEERS];
+uint8_t peerCount = 0;
 
 typedef struct {
     uint16_t sampleavg;
@@ -49,7 +54,7 @@ typedef struct {
 } Command;
 
 #define AD_FREQUENCY     3000
-#define HELLO_TIMEOUT   15000
+#define HELLO_TIMEOUT   20000
 
 // For moving averages
 uint32_t mat = 0;
@@ -135,12 +140,16 @@ void handleWsCommand(char *cmd) {
     broadcastState();
 }
 
+#define STATUS \
+    "{\"minv\": %u,\"maxv\": %u,\"n1\": %u,\"n2\": %u,\"peakdelta\": %u," \
+    "\"lamps\": %u,\"sampling\": %s,\"name\": \"%s\",\"version\":\"" SW_VERSION "\"}"
+
+
 void broadcastState() {
     char state[512];
     state[0] = '\0';
-    snprintf(state, 511,
-             "{\"minv\": %u,\"maxv\": %u,\"n1\": %u,\"n2\": %u,\"peakdelta\": %u,\"lamps\": %u,\"sampling\": %s, \"version\":\"" SW_VERSION "\"}",
-             minv, maxv, n1, n2, peakdelta, lampCount, sampling ? "true" : "false");
+    snprintf(state, 511, STATUS, minv, maxv, n1, n2, peakdelta,
+            peerCount, sampling ? "true" : "false", gizmo.getHostname());
     wsServer.broadcastTXT(state);
 }
 
@@ -177,30 +186,32 @@ void advertise() {
 
 void addSampling(uint32_t ip, boolean refreshSampling) {
     int ai = -1;
-    for (int i = 0; i < MAX_LAMPS; i++) {
-        if (ip == lampIps[i]) {
-            lampTimes[i] = millis() + HELLO_TIMEOUT;
-            lampSampling[i] = refreshSampling ? true : lampSampling[i];
+    for (int i = 0; i < MAX_PEERS; i++) {
+        if (ip == peers[i].ip) {
+            peers[i].lastHeard = millis() + HELLO_TIMEOUT;
+            peers[i].sampling = refreshSampling ? true : peers[i].sampling;
             return;
         }
-        if (ai < 0 && !lampIps[i]) {
+        if (ai < 0 && !peers[i].ip) {
             ai = i;
         }
     }
     if (ai >= 0) {
-        lampIps[ai] = ip;
-        lampTimes[ai] = millis() + HELLO_TIMEOUT;
-        lampSampling[ai] = refreshSampling ? true : lampSampling[ai];
+        peers[ai].ip = ip;
+        peers[ai].lastHeard = millis() + HELLO_TIMEOUT;
+        peers[ai].sampling = refreshSampling ? true : peers[ai].sampling;
         advertise();
         Serial.printf("Started sampling for %s\n", IPAddress(ip).toString().c_str());
+        gizmo.debug("added sampling for target");
     }
 }
 
 void removeSampling(uint32_t  ip) {
-    for (int i = 0; i < MAX_LAMPS; i++) {
-        if (ip == lampIps[i]) {
-            lampSampling[i] = false;
+    for (int i = 0; i < MAX_PEERS; i++) {
+        if (ip == peers[i].ip) {
+            peers[i].sampling = false;
             Serial.printf("Stopped sampling for %s\n", IPAddress(ip).toString().c_str());
+            gizmo.debug("stopped sampling for target");
             return;
         }
     }
@@ -320,22 +331,26 @@ void handleMic() {
         uint32_t now = millis();
         uint8_t count = 0;
         boolean active = false;
-        for (int i = 0; i < MAX_LAMPS; i++) {
-            if (lampIps[i] && lampTimes[i] >= now && lampSampling[i]) {
-                buddy.beginPacket(IPAddress(lampIps[i]), BUDDY_PORT);
+        for (int i = 0; i < MAX_PEERS; i++) {
+            if (peers[i].ip && peers[i].lastHeard >= now && peers[i].sampling) {
+                buddy.beginPacket(IPAddress(peers[i].ip), BUDDY_PORT);
                 buddy.write((char *) &sample, sizeof(sample));
                 buddy.endPacket();
                 active = true;
-                count++;
-            } else if (lampTimes[i] && lampTimes[i] < now) {
-                Serial.printf("Lamp %s timed out\n", IPAddress(lampIps[i]).toString().c_str());
-                lampIps[i] = 0;
-                lampTimes[i] = 0;
-            } else {
+            } else if (peers[i].lastHeard && peers[i].lastHeard < now) {
+                Serial.printf("Lamp %s timed out\n", IPAddress(peers[i].ip).toString().c_str());
+                peers[i].ip = 0;
+                peers[i].lastHeard = 0;
+                peers[i].lastHeard = 0;
+                peers[i].sampling = 0;
+                gizmo.debug("timed out sampling target");
+            }
+
+            if (peers[i].ip) {
                 count++;
             }
         }
-        lampCount = count;
+        peerCount = count;
         sampling = active;
 
         if (sampling) {
