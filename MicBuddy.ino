@@ -6,7 +6,7 @@
 
 #define MIC_BUDDY      "MicBuddy"
 #define SW_UPDATE_URL   "http://iot.vachuska.com/MicBuddy.ino.bin"
-#define SW_VERSION      "2020.03.05.003"
+#define SW_VERSION      "2020.03.05.006"
 
 #define STATE      "/cfg/state"
 
@@ -15,6 +15,9 @@
 
 #define BUDDY_PORT  7001
 WiFiUDP buddy;
+
+#define PEER_PORT  7003
+WiFiUDP peer;
 
 #define GROUP_PORT  7002
 WiFiUDP group;
@@ -79,7 +82,7 @@ void setup() {
     gizmo.beginSetup(MIC_BUDDY, SW_VERSION, "gizmo123");
     gizmo.setUpdateURL(SW_UPDATE_URL);
     gizmo.setCallback(defaultMqttCallback);
-    gizmo.debugEnabled = true;
+//    gizmo.debugEnabled = true;
 
     setupWebSocket();
 
@@ -91,7 +94,7 @@ void setup() {
 void loop() {
     if (gizmo.isNetworkAvailable(finishWiFiConnect)) {
         wsServer.loop();
-        handleMulticast();
+        handleClients();
         handleMic();
         handleAdvertisement();
     }
@@ -99,6 +102,7 @@ void loop() {
 
 void finishWiFiConnect() {
     buddy.begin(BUDDY_PORT);
+    peer.begin(PEER_PORT);
     group.beginMulticast(WiFi.localIP(), groupIp, GROUP_PORT);
     advertise();
     Serial.printf("%s is ready\n", MIC_BUDDY);
@@ -184,6 +188,14 @@ void advertise() {
     group.beginPacketMulticast(groupIp, GROUP_PORT, WiFi.localIP());
     group.write((char *) &ad, sizeof(ad));
     group.endPacket();
+
+    for (int i = 0; i < MAX_PEERS; i++) {
+        if (peers[i].ip && peers[i].lastHeard) {
+            peer.beginPacket(peers[i].ip, PEER_PORT);
+            peer.write((char *) &ad, sizeof(ad));
+            peer.endPacket();
+        }
+    }
 }
 
 void addSampling(uint32_t ip, boolean refreshSampling) {
@@ -218,28 +230,41 @@ void removeSampling(uint32_t  ip) {
 }
 
 
-void handleMulticast() {
+void handleClients() {
     Command command;
     while (group.parsePacket()) {
         int len = group.read((char *) &command, sizeof(command));
         if (len < 0) {
-            Serial.printf("Unable to read command!!!!\n");
+            gizmo.debug("Unable to read command!!!!");
+        } else {
+            handleClient(command);
         }
+    }
 
-        switch (command.op) {
-            case HELLO:
-                addSampling(command.src, false);
-                break;
-            case SAMPLE_REQ:
-                if (command.data[0]) {
-                    addSampling(command.src, true);
-                } else {
-                    removeSampling(command.src);
-                }
-                break;
-            default:
-                break;
+    while (peer.parsePacket()) {
+        int len = peer.read((char *) &command, sizeof(command));
+        if (len < 0) {
+            gizmo.debug("Unable to read command!!!!");
+        } else {
+            handleClient(command);
         }
+    }
+}
+
+void handleClient(Command command) {
+    switch (command.op) {
+        case HELLO:
+            addSampling(command.src, false);
+            break;
+        case SAMPLE_REQ:
+            if (command.data[0]) {
+                addSampling(command.src, true);
+            } else {
+                removeSampling(command.src);
+            }
+            break;
+        default:
+            break;
     }
 }
 
