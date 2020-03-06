@@ -6,7 +6,7 @@
 
 #define MIC_BUDDY      "MicBuddy"
 #define SW_UPDATE_URL   "http://iot.vachuska.com/MicBuddy.ino.bin"
-#define SW_VERSION      "2020.03.05.002"
+#define SW_VERSION      "2020.03.05.003"
 
 #define STATE      "/cfg/state"
 
@@ -79,6 +79,7 @@ void setup() {
     gizmo.beginSetup(MIC_BUDDY, SW_VERSION, "gizmo123");
     gizmo.setUpdateURL(SW_UPDATE_URL);
     gizmo.setCallback(defaultMqttCallback);
+    gizmo.debugEnabled = true;
 
     setupWebSocket();
 
@@ -174,6 +175,7 @@ void handleAdvertisement() {
     if (nextAdvertisement < millis()) {
         nextAdvertisement = millis() + AD_FREQUENCY;
         advertise();
+        gizmo.debug("peerCount=%d sampling=%d", peerCount, sampling);
     }
 }
 
@@ -201,8 +203,7 @@ void addSampling(uint32_t ip, boolean refreshSampling) {
         peers[ai].lastHeard = millis() + HELLO_TIMEOUT;
         peers[ai].sampling = refreshSampling ? true : peers[ai].sampling;
         advertise();
-        Serial.printf("Started sampling for %s\n", IPAddress(ip).toString().c_str());
-        gizmo.debug("added sampling for target");
+        gizmo.debug("Started sampling for %s", IPAddress(ip).toString().c_str());
     }
 }
 
@@ -210,8 +211,7 @@ void removeSampling(uint32_t  ip) {
     for (int i = 0; i < MAX_PEERS; i++) {
         if (ip == peers[i].ip) {
             peers[i].sampling = false;
-            Serial.printf("Stopped sampling for %s\n", IPAddress(ip).toString().c_str());
-            gizmo.debug("stopped sampling for target");
+            gizmo.debug("Stopped sampling for %s", IPAddress(ip).toString().c_str());
             return;
         }
     }
@@ -338,12 +338,11 @@ void handleMic() {
                 buddy.endPacket();
                 active = true;
             } else if (peers[i].lastHeard && peers[i].lastHeard < now) {
-                Serial.printf("Lamp %s timed out\n", IPAddress(peers[i].ip).toString().c_str());
+                gizmo.debug("Lamp %s timed out", IPAddress(peers[i].ip).toString().c_str());
                 peers[i].ip = 0;
                 peers[i].lastHeard = 0;
                 peers[i].lastHeard = 0;
                 peers[i].sampling = 0;
-                gizmo.debug("timed out sampling target");
             }
 
             if (peers[i].ip) {
