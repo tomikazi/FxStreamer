@@ -23,6 +23,7 @@ IPAddress groupIp(224, 0, 42, 69);
 #define MAX_LAMPS   4
 uint32_t lampIps[MAX_LAMPS];
 uint32_t lampTimes[MAX_LAMPS];
+boolean lampSampling[MAX_LAMPS];
 uint8_t lampCount = 0;
 
 typedef struct {
@@ -35,6 +36,7 @@ typedef struct {
 #define BACK_CTX        0x10
 #define ALL_CTX         FRONT_CTX | BACK_CTX
 
+#define HELLO           001
 #define SAMPLE_REQ      100
 #define SAMPLE_ADV      101
 
@@ -138,7 +140,7 @@ void broadcastState() {
     state[0] = '\0';
     snprintf(state, 511,
              "{\"minv\": %u,\"maxv\": %u,\"n1\": %u,\"n2\": %u,\"peakdelta\": %u,\"lamps\": %u,\"sampling\": %s, \"version\":\"" SW_VERSION "\"}",
-             minv, maxv, n1, n2, peakdelta, lampCount, lampCount ? "true" : "false");
+             minv, maxv, n1, n2, peakdelta, lampCount, sampling ? "true" : "false");
     wsServer.broadcastTXT(state);
 }
 
@@ -173,11 +175,12 @@ void advertise() {
     group.endPacket();
 }
 
-void addLamp(uint32_t ip) {
+void addSampling(uint32_t ip, boolean refreshSampling) {
     int ai = -1;
     for (int i = 0; i < MAX_LAMPS; i++) {
         if (ip == lampIps[i]) {
             lampTimes[i] = millis() + HELLO_TIMEOUT;
+            lampSampling[i] = refreshSampling ? true : lampSampling[i];
             return;
         }
         if (ai < 0 && !lampIps[i]) {
@@ -187,17 +190,17 @@ void addLamp(uint32_t ip) {
     if (ai >= 0) {
         lampIps[ai] = ip;
         lampTimes[ai] = millis() + HELLO_TIMEOUT;
+        lampSampling[ai] = refreshSampling ? true : lampSampling[ai];
         advertise();
-        Serial.printf("Lamp %s added\n", IPAddress(ip).toString().c_str());
+        Serial.printf("Started sampling for %s\n", IPAddress(ip).toString().c_str());
     }
 }
 
-void removeLamp(uint32_t  ip) {
+void removeSampling(uint32_t  ip) {
     for (int i = 0; i < MAX_LAMPS; i++) {
         if (ip == lampIps[i]) {
-            lampIps[i] = 0;
-            lampTimes[i] = 0;
-            Serial.printf("Lamp %s removed\n", IPAddress(ip).toString().c_str());
+            lampSampling[i] = false;
+            Serial.printf("Stopped sampling for %s\n", IPAddress(ip).toString().c_str());
             return;
         }
     }
@@ -213,11 +216,14 @@ void handleMulticast() {
         }
 
         switch (command.op) {
+            case HELLO:
+                addSampling(command.src, false);
+                break;
             case SAMPLE_REQ:
                 if (command.data[0]) {
-                    addLamp(command.src);
+                    addSampling(command.src, true);
                 } else {
-                    removeLamp(command.src);
+                    removeSampling(command.src);
                 }
                 break;
             default:
@@ -313,21 +319,26 @@ void handleMic() {
 
         uint32_t now = millis();
         uint8_t count = 0;
+        boolean active = false;
         for (int i = 0; i < MAX_LAMPS; i++) {
-            if (lampIps[i] && lampTimes[i] >= now) {
+            if (lampIps[i] && lampTimes[i] >= now && lampSampling[i]) {
                 buddy.beginPacket(IPAddress(lampIps[i]), BUDDY_PORT);
                 buddy.write((char *) &sample, sizeof(sample));
                 buddy.endPacket();
+                active = true;
                 count++;
             } else if (lampTimes[i] && lampTimes[i] < now) {
                 Serial.printf("Lamp %s timed out\n", IPAddress(lampIps[i]).toString().c_str());
                 lampIps[i] = 0;
                 lampTimes[i] = 0;
+            } else {
+                count++;
             }
         }
         lampCount = count;
+        sampling = active;
 
-        if (lampCount) {
+        if (sampling) {
             Serial.printf("255, %d, %d, %d, %d, %d\n", av, sampleavg, baseavg, samplepeak * 200, v);
         }
     }
