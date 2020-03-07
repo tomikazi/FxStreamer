@@ -6,7 +6,7 @@
 
 #define MIC_BUDDY      "MicBuddy"
 #define SW_UPDATE_URL   "http://iot.vachuska.com/MicBuddy.ino.bin"
-#define SW_VERSION      "2020.03.05.006"
+#define SW_VERSION      "2020.03.07.002"
 
 #define STATE      "/cfg/state"
 
@@ -378,7 +378,7 @@ void handleMic() {
         sampling = active;
 
         if (sampling) {
-            Serial.printf("255, %d, %d, %d, %d, %d\n", av, sampleavg, baseavg, samplepeak * 200, v);
+            Serial.printf("255, %d, %d, %d, %d, %d, 470\n", av, sampleavg, baseavg, samplepeak * 200, v);
         }
     }
 }
