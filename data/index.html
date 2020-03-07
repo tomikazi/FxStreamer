@@ -18,13 +18,17 @@
             }
 
             function process(d) {
+                let name = d.name.replace(/([A-Z]+)/g, ' $1').replace(/^ /, '');
+                $(document).prop('title', name);
+                $('#title').html(name);
+
                 set('minv',d.minv);
                 set('maxv', d.maxv);
                 set('n1', d.n1);
                 set('n2', d.n2);
                 set('peakdelta', d.peakdelta);
-                $('#streaming').html(d.lamps ? ('Streaming to ' + d.lamps + (d.lamps === 1 ? ' lamp' : ' lamps')) : 'Not Streaming');
-                $('#streaming').css('color', d.lamps ? '#00ffaf' : '#ffaf00');
+                $('#error').html(d.sampling ? ('Streaming to ' + d.lamps + (d.lamps === 1 ? ' lamp' : ' lamps')) : 'Not Streaming');
+                $('#error').css('color', d.sampling ? '#00ffaf' : '#ffaf00');
                 $('#version').html(d.version);
             }
 
@@ -36,6 +40,8 @@
 
             function markLive(on) {
                 $('#error').html(on ? '&nbsp;' : 'Disconnected');
+                $('#error').css('color', on ? '#00ffaf' : '#ffaf00');
+
             }
 
             function startWebSocket() {
@@ -116,6 +122,12 @@
             text-align: center;
         }
 
+        #title {
+            font-size: 32px;
+            font-weight: bold;
+            color: #ccc;
+        }
+
         #error {
             position: relative;
             display: inline-block;
@@ -124,11 +136,6 @@
             padding: 8px 8px 0px 8px;
             background-color: #444;
             color: #ffaf00;
-            font-size: 18px;
-        }
-
-        #status {
-            color: #ccc;
             font-size: 18px;
         }
 
@@ -158,8 +165,9 @@
         }
 
         .advanced input::-webkit-slider-thumb {
-            width: 16px;
-            height: 16px;
+            width: 18px;
+            height: 18px;
+            margin: 10px;
         }
 
         .param::-webkit-slider-thumb {
@@ -167,6 +175,7 @@
             appearance: none;
             width: 25px;
             height: 25px;
+            margin: 10px;
             border-radius: 50%;
             background: #2196F3;
             cursor: pointer;
@@ -214,11 +223,10 @@
 <body>
     <div data-role="main" class="ui-content">
         <p>
-        <div id="error"></div>
+        <div id="title">Mic Buddy</div>
         <p>
-        <div id="status">
-            <span id="streaming"></span>
-        </div>
+        <p>
+        <div id="error"></div>
         <p>
         <div class="paramcontainer" id="volume">
             <span>Music Volume: </span><span class="value">128</span>
