@@ -4,9 +4,9 @@
 
 #include <WebSocketsServer.h>
 
-#define MIC_BUDDY      "MicBuddy"
-#define SW_UPDATE_URL   "http://iot.vachuska.com/MicBuddy.ino.bin"
-#define SW_VERSION      "2020.03.07.002"
+#define FX_STREAMER     ""
+#define SW_UPDATE_URL   "http://iot.vachuska.com/FxStreamer.ino.bin"
+#define SW_VERSION      "2020.03.08.001"
 
 #define STATE      "/cfg/state"
 
@@ -79,7 +79,7 @@ boolean sampling = false;
 static WebSocketsServer wsServer(81);
 
 void setup() {
-    gizmo.beginSetup(MIC_BUDDY, SW_VERSION, "gizmo123");
+    gizmo.beginSetup(FX_STREAMER, SW_VERSION, "gizmo123");
     gizmo.setUpdateURL(SW_UPDATE_URL);
     gizmo.setCallback(defaultMqttCallback);
 //    gizmo.debugEnabled = true;
@@ -105,7 +105,7 @@ void finishWiFiConnect() {
     peer.begin(PEER_PORT);
     group.beginMulticast(WiFi.localIP(), groupIp, GROUP_PORT);
     advertise();
-    Serial.printf("%s is ready\n", MIC_BUDDY);
+    Serial.printf("%s is ready\n", FX_STREAMER);
 }
 
 void setupWebSocket() {
