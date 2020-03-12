@@ -6,7 +6,7 @@
 
 #define FX_STREAMER     "FxStreamer"
 #define SW_UPDATE_URL   "http://iot.vachuska.com/FxStreamer.ino.bin"
-#define SW_VERSION      "2020.03.08.003"
+#define SW_VERSION      "2020.03.12.001"
 
 #define STATE      "/cfg/state"
 
@@ -56,6 +56,7 @@ typedef struct {
     uint8_t  data[MAX_CMD_DATA];
 } Command;
 
+#define SAMPLE_FREQUENCY   10
 #define AD_FREQUENCY     3000
 #define HELLO_TIMEOUT   20000
 
@@ -319,7 +320,7 @@ void saveState() {
 
 void handleMic() {
     if (nextSample < millis()) {
-        nextSample = millis() + 5;
+        nextSample = millis() + SAMPLE_FREQUENCY;
 
         uint16_t v = analogRead(MIC_PIN);
 
