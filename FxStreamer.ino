@@ -217,6 +217,7 @@ void addSampling(uint32_t ip, boolean refreshSampling) {
         peers[ai].sampling = refreshSampling ? true : peers[ai].sampling;
         advertise();
         gizmo.debug("Started sampling for %s", IPAddress(ip).toString().c_str());
+        broadcastState();
     }
 }
 
@@ -225,6 +226,7 @@ void removeSampling(uint32_t  ip) {
         if (ip == peers[i].ip) {
             peers[i].sampling = false;
             gizmo.debug("Stopped sampling for %s", IPAddress(ip).toString().c_str());
+            broadcastState();
             return;
         }
     }

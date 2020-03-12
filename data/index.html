@@ -71,15 +71,11 @@
             }
 
             function checkWebSocket() {
-                if (lastHeard < new Date().getTime() - 5000) {
-                    if (ws && ws.readyState !== 0) {
-                        connectionLost('WebSocket went stale...');
-                        markLive(false);
-                        ws.close();
-                        startWebSocket();
-                    }
-                } else if (ws && ws.readyState === 1) {
-                    send("get", "status");
+                if (ws && ws.readyState !== 1) {
+                    connectionLost('WebSocket went stale...');
+                    markLive(false);
+                    ws.close();
+                    startWebSocket();
                 }
             }
 
