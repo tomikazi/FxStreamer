@@ -17,10 +17,17 @@
                 $('#' + n).prop('value', v).prev().html(v);
             }
 
+            function retitle(t) {
+                let nt = t.replace(/-[a-fA-F0-9]{6}/g, '')
+                    .replace(/([A-Z-]+)/g, ' $1').replace(/([A-Z][a-z])/g, ' $1')
+                    .replace('Fx ', 'FX').replace(/  /g, ' ');
+                console.log(nt);
+                $(document).prop('title', nt);
+                $('#title').html(nt);
+            }
+
             function process(d) {
-                let name = d.name.replace(/([A-Z]+)/g, ' $1').replace(/^ /, '');
-                $(document).prop('title', name);
-                $('#title').html(name);
+                retitle(d.name);
 
                 set('minv',d.minv);
                 set('maxv', d.maxv);
@@ -219,7 +226,7 @@
 <body>
     <div data-role="main" class="ui-content">
         <p>
-        <div id="title">Mic Buddy</div>
+        <div id="title">FX Streamer</div>
         <p>
         <p>
         <div id="error"></div>
