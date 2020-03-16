@@ -6,7 +6,7 @@
 
 #define FX_STREAMER     "FxStreamer"
 #define SW_UPDATE_URL   "http://iot.vachuska.com/FxStreamer.ino.bin"
-#define SW_VERSION      "2020.03.12.001"
+#define SW_VERSION      "2020.03.15.001"
 
 #define STATE      "/cfg/state"
 
@@ -63,6 +63,7 @@ typedef struct {
 // For moving averages
 uint32_t mat = 0;
 uint32_t nmat = 0;
+uint32_t smat = 0;
 
 // Sample average, max and peak detection
 uint16_t baseavg = 0;
@@ -76,6 +77,7 @@ uint8_t n1, n2, peakdelta;
 uint32_t nextAdvertisement = 0;
 uint32_t nextSample = 0;
 boolean sampling = false;
+boolean silenceDetected = false;
 
 static WebSocketsServer wsServer(81);
 
@@ -147,15 +149,15 @@ void handleWsCommand(char *cmd) {
 }
 
 #define STATUS \
-    "{\"minv\": %u,\"maxv\": %u,\"n1\": %u,\"n2\": %u,\"peakdelta\": %u," \
+    "{\"minv\": %u,\"maxv\": %u,\"n1\": %u,\"n2\": %u,\"peakdelta\": %u,\"silence:\": %s," \
     "\"lamps\": %u,\"sampling\": %s,\"name\": \"%s\",\"version\":\"" SW_VERSION "\"}"
 
 
 void broadcastState() {
     char state[512];
     state[0] = '\0';
-    snprintf(state, 511, STATUS, minv, maxv, n1, n2, peakdelta,
-            peerCount, sampling ? "true" : "false", gizmo.getHostname());
+    snprintf(state, 511, STATUS, minv, maxv, n1, n2, peakdelta, silenceDetected ? "true" : "false",
+             peerCount, sampling ? "true" : "false", gizmo.getHostname());
     wsServer.broadcastTXT(state);
 }
 
@@ -163,7 +165,7 @@ void processCallback(char *topic, char *value) {
     if (strstr(topic, "/minv")) {
         minv = parse(value, 0, 16, 4);
     } else if (strstr(topic, "/maxv")) {
-        maxv = parse(value, 8, 255, 128);
+        maxv = parse(value, 4, 255, 128);
     } else if (strstr(topic, "/n1")) {
         n1 = parse(value, 2, 8, 4);
     } else if (strstr(topic, "/n2")) {
@@ -185,7 +187,7 @@ void handleAdvertisement() {
 }
 
 void advertise() {
-    Command ad = { .src = (uint) WiFi.localIP(), .ctx = ALL_CTX, .op = SAMPLE_ADV, .data = { [0] = 0}};
+    Command ad = { .src = (uint) WiFi.localIP(), .ctx = ALL_CTX, .op = SAMPLE_ADV, .data = { [0] = silenceDetected}};
     group.beginPacketMulticast(groupIp, GROUP_PORT, WiFi.localIP());
     group.write((char *) &ad, sizeof(ad));
     group.endPacket();
@@ -273,7 +275,7 @@ void handleClient(Command command) {
 
 void setupSampler() {
     minv = 4;
-    maxv = 128;
+    maxv = 32;
     n1 = 4;
     n2 = 2;
     peakdelta = 16;
@@ -294,7 +296,7 @@ void loadState() {
 
         l = f.readBytesUntil('|', field, 7);
         field[l] = '\0';
-        maxv = parse(field, 8, 255, 128);
+        maxv = parse(field, 4, 255, 128);
 
         l = f.readBytesUntil('|', field, 7);
         field[l] = '\0';
@@ -346,6 +348,9 @@ void handleMic() {
             nmat = av;
             sampleavg = av;
         }
+
+        smat = smat + av - (smat >> 12);
+        silenceDetected = (smat >> 12) < minv;
 
         // We're on the down swing, so we just peaked.
         samplepeak = av > (sampleavg + peakdelta) && (av < oldsample);
