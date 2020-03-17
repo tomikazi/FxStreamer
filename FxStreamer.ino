@@ -6,7 +6,7 @@
 
 #define FX_STREAMER     "FxStreamer"
 #define SW_UPDATE_URL   "http://iot.vachuska.com/FxStreamer.ino.bin"
-#define SW_VERSION      "2020.03.15.001"
+#define SW_VERSION      "2020.03.16.001"
 
 #define STATE      "/cfg/state"
 
@@ -84,10 +84,10 @@ static WebSocketsServer wsServer(81);
 void setup() {
     gizmo.beginSetup(FX_STREAMER, SW_VERSION, "gizmo123");
     gizmo.setUpdateURL(SW_UPDATE_URL);
-    gizmo.setCallback(defaultMqttCallback);
-//    gizmo.debugEnabled = true;
-
+    gizmo.setupWebRoot();
     setupWebSocket();
+
+    gizmo.setCallback(defaultMqttCallback);
 
     setupSampler();
     loadState();
