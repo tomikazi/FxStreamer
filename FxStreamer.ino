@@ -6,12 +6,11 @@
 
 #define FX_STREAMER     "FxStreamer"
 #define SW_UPDATE_URL   "http://iot.vachuska.com/FxStreamer.ino.bin"
-#define SW_VERSION      "2020.03.16.001"
+#define SW_VERSION      "2020.03.27.001"
 
 #define STATE      "/cfg/state"
 
 #define MIC_PIN         A0
-#define PIR_PIN          5
 
 #define BUDDY_PORT  7001
 WiFiUDP buddy;
