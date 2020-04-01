@@ -94,8 +94,6 @@
             $('#error').click(function () {
                 if (!ws || ws.readyState !== 1) {
                     startWebSocket();
-                } else if (masterIp) {
-                    window.location.href = 'http://' + masterIp;
                 }
             });
 
