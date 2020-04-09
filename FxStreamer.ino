@@ -6,7 +6,7 @@
 
 #define FX_STREAMER     "FxStreamer"
 #define SW_UPDATE_URL   "http://iot.vachuska.com/FxStreamer.ino.bin"
-#define SW_VERSION      "2020.03.27.001"
+#define SW_VERSION      "2020.04.08.001"
 
 #define STATE      "/cfg/state"
 
