@@ -6,7 +6,7 @@
 
 #define FX_STREAMER     "FxStreamer"
 #define SW_UPDATE_URL   "http://iot.vachuska.com/FxStreamer.ino.bin"
-#define SW_VERSION      "2020.04.08.001"
+#define SW_VERSION      "2020.05.09.001"
 
 #define STATE      "/cfg/state"
 
@@ -22,7 +22,7 @@ WiFiUDP peer;
 WiFiUDP group;
 IPAddress groupIp(224, 0, 42, 69);
 
-#define MAX_PEERS   4
+#define MAX_PEERS   8
 typedef struct {
     uint32_t ip;
     uint32_t lastHeard;
