@@ -6,7 +6,7 @@
 
 #define FX_STREAMER     "FxStreamer"
 #define SW_UPDATE_URL   "http://iot.vachuska.com/FxStreamer.ino.bin"
-#define SW_VERSION      "2020.05.11.001"
+#define SW_VERSION      "2020.05.11.002"
 
 #define STATE      "/cfg/state"
 
@@ -77,7 +77,7 @@ uint8_t n1, n2, peakdelta;
 uint32_t nextAdvertisement = 0;
 uint32_t nextSample = 0;
 boolean sampling = false;
-boolean silenceDetected = false;
+boolean silenceDetected = true;
 
 static WebSocketsServer wsServer(81);
 
@@ -351,6 +351,8 @@ void handleMic() {
             sampleavg = av;
         }
 
+        boolean wasSilenceDetected = silenceDetected;
+
         smat = smat + av - (smat >> 12);
         silenceDetected = (smat >> 12) < minv;
 
@@ -368,6 +370,8 @@ void handleMic() {
         uint8_t streams = 0;
         boolean active = false;
         boolean wasSampling = sampling;
+        uint8_t oldStreamCount = streamCount;
+        uint8_t oldPeerCount = peerCount;
         for (int i = 0; i < MAX_PEERS; i++) {
             if (peers[i].ip && peers[i].lastHeard >= now && peers[i].sampling) {
                 buddy.beginPacket(IPAddress(peers[i].ip), BUDDY_PORT);
@@ -395,7 +399,8 @@ void handleMic() {
             Serial.printf("255, %d, %d, %d, %d, %d, 470\n", av, sampleavg, baseavg, samplepeak * 200, v);
         }
 
-        if (sampling != wasSampling) {
+        if (sampling != wasSampling || silenceDetected != wasSilenceDetected ||
+                streamCount != oldStreamCount || peerCount != oldPeerCount) {
             broadcastState();
         }
     }
