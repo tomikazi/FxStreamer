@@ -6,7 +6,7 @@
 
 #define FX_STREAMER     "FxStreamer"
 #define SW_UPDATE_URL   "http://iot.vachuska.com/FxStreamer.ino.bin"
-#define SW_VERSION      "2020.05.09.001"
+#define SW_VERSION      "2020.05.11.001"
 
 #define STATE      "/cfg/state"
 
@@ -32,6 +32,7 @@ typedef struct {
 
 Peer peers[MAX_PEERS];
 uint8_t peerCount = 0;
+uint8_t streamCount = 0;
 
 typedef struct {
     uint16_t sampleavg;
@@ -87,6 +88,8 @@ void setup() {
     setupWebSocket();
 
     gizmo.setCallback(defaultMqttCallback);
+
+//    gizmo.debugEnabled = true;
 
     setupSampler();
     loadState();
@@ -148,15 +151,15 @@ void handleWsCommand(char *cmd) {
 }
 
 #define STATUS \
-    "{\"minv\": %u,\"maxv\": %u,\"n1\": %u,\"n2\": %u,\"peakdelta\": %u,\"silence:\": %s," \
-    "\"lamps\": %u,\"sampling\": %s,\"name\": \"%s\",\"version\":\"" SW_VERSION "\"}"
+    "{\"minv\": %u,\"maxv\": %u,\"n1\": %u,\"n2\": %u,\"peakdelta\": %u,\"silence\": %s," \
+    "\"lamps\": %u,\"streams\": %u,\"sampling\": %s,\"name\": \"%s\",\"version\":\"" SW_VERSION "\"}"
 
 
 void broadcastState() {
     char state[512];
     state[0] = '\0';
     snprintf(state, 511, STATUS, minv, maxv, n1, n2, peakdelta, silenceDetected ? "true" : "false",
-             peerCount, sampling ? "true" : "false", gizmo.getHostname());
+             peerCount, streamCount, sampling ? "true" : "false", gizmo.getHostname());
     wsServer.broadcastTXT(state);
 }
 
@@ -224,7 +227,7 @@ void addSampling(uint32_t ip, boolean refreshSampling) {
 
 void removeSampling(uint32_t  ip) {
     for (int i = 0; i < MAX_PEERS; i++) {
-        if (ip == peers[i].ip) {
+        if (ip == peers[i].ip && peers[i].sampling) {
             peers[i].sampling = false;
             gizmo.debug("Stopped sampling for %s", IPAddress(ip).toString().c_str());
             broadcastState();
@@ -362,12 +365,15 @@ void handleMic() {
 
         uint32_t now = millis();
         uint8_t count = 0;
+        uint8_t streams = 0;
         boolean active = false;
+        boolean wasSampling = sampling;
         for (int i = 0; i < MAX_PEERS; i++) {
             if (peers[i].ip && peers[i].lastHeard >= now && peers[i].sampling) {
                 buddy.beginPacket(IPAddress(peers[i].ip), BUDDY_PORT);
                 buddy.write((char *) &sample, sizeof(sample));
                 buddy.endPacket();
+                streams++;
                 active = true;
             } else if (peers[i].lastHeard && peers[i].lastHeard < now) {
                 gizmo.debug("Lamp %s timed out", IPAddress(peers[i].ip).toString().c_str());
@@ -382,10 +388,15 @@ void handleMic() {
             }
         }
         peerCount = count;
+        streamCount = streams;
         sampling = active;
 
         if (sampling) {
             Serial.printf("255, %d, %d, %d, %d, %d, 470\n", av, sampleavg, baseavg, samplepeak * 200, v);
+        }
+
+        if (sampling != wasSampling) {
+            broadcastState();
         }
     }
 }

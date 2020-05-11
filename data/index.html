@@ -34,7 +34,10 @@
                 set('n1', d.n1);
                 set('n2', d.n2);
                 set('peakdelta', d.peakdelta);
-                $('#error').html(d.sampling ? ('Streaming to ' + d.lamps + (d.lamps === 1 ? ' lamp' : ' lamps')) : 'Not Streaming');
+
+                let lmps = '' + d.lamps + (d.lamps === 1 ? ' lamp' : ' lamps')
+                let sndd = d.silence ? 'Silent' : 'Sound Detected';
+                $('#error').html((d.sampling ? ('Streaming to ' + d.streams + ' of ' + lmps) : 'Not Streaming (' + lmps + ')') + '<br>' + sndd);
                 $('#error').css('color', d.sampling ? '#00ffaf' : '#ffaf00');
                 $('#version').html(d.version);
             }
