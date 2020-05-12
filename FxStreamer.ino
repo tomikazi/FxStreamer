@@ -6,7 +6,7 @@
 
 #define FX_STREAMER     "FxStreamer"
 #define SW_UPDATE_URL   "http://iot.vachuska.com/FxStreamer.ino.bin"
-#define SW_VERSION      "2020.05.11.002"
+#define SW_VERSION      "2020.05.11.004"
 
 #define STATE      "/cfg/state"
 
@@ -353,8 +353,8 @@ void handleMic() {
 
         boolean wasSilenceDetected = silenceDetected;
 
-        smat = smat + av - (smat >> 12);
-        silenceDetected = (smat >> 12) < minv;
+        smat = smat + av - (smat >> 10);
+        silenceDetected = (smat >> 10) < (3 * minv);
 
         // We're on the down swing, so we just peaked.
         samplepeak = av > (sampleavg + peakdelta) && (av < oldsample);
