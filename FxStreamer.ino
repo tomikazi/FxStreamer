@@ -6,7 +6,7 @@
 
 #define FX_STREAMER     "FxStreamer"
 #define SW_UPDATE_URL   "http://iot.vachuska.com/FxStreamer.ino.bin"
-#define SW_VERSION      "2020.07.29.001"
+#define SW_VERSION      "2022.04.12.001"
 
 #define STATE      "/cfg/state"
 
@@ -98,11 +98,11 @@ void setup() {
 
 void loop() {
     if (gizmo.isNetworkAvailable(finishWiFiConnect)) {
-        wsServer.loop();
         handleClients();
         handleMic();
         handleAdvertisement();
     }
+    wsServer.loop();
 }
 
 void finishWiFiConnect() {
