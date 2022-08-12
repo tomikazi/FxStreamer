@@ -6,19 +6,22 @@
 
 #define FX_STREAMER     "FxStreamer"
 #define SW_UPDATE_URL   "http://iot.vachuska.com/FxStreamer.ino.bin"
-#define SW_VERSION      "2022.04.12.001"
+#define SW_VERSION      "2022.08.11.001"
 
 #define STATE      "/cfg/state"
 
 #define MIC_PIN         A0
 
 #define BUDDY_PORT  7001
+uint16_t buddyPort = BUDDY_PORT;
 WiFiUDP buddy;
 
 #define PEER_PORT  7003
+uint16_t peerPort = PEER_PORT;
 WiFiUDP peer;
 
 #define GROUP_PORT  7002
+uint16_t groupPort = GROUP_PORT;
 WiFiUDP group;
 IPAddress groupIp(224, 0, 42, 69);
 
@@ -84,6 +87,8 @@ static WebSocketsServer wsServer(81);
 void setup() {
     gizmo.beginSetup(FX_STREAMER, SW_VERSION, "gizmo123");
     gizmo.setUpdateURL(SW_UPDATE_URL);
+
+    gizmo.httpServer()->on("/ports", handlePorts);
     gizmo.setupWebRoot();
     setupWebSocket();
 
@@ -92,6 +97,7 @@ void setup() {
 //    gizmo.debugEnabled = true;
 
     setupSampler();
+    loadPorts();
     loadState();
     gizmo.endSetup();
 }
@@ -106,11 +112,37 @@ void loop() {
 }
 
 void finishWiFiConnect() {
-    buddy.begin(BUDDY_PORT);
-    peer.begin(PEER_PORT);
-    group.beginMulticast(WiFi.localIP(), groupIp, GROUP_PORT);
+    buddy.begin(buddyPort);
+    peer.begin(peerPort);
+    group.beginMulticast(WiFi.localIP(), groupIp, groupPort);
     advertise();
     Serial.printf("%s is ready\n", FX_STREAMER);
+}
+
+void handlePorts() {
+    ESP8266WebServer *server = gizmo.httpServer();
+    char port[8];
+    if (server->hasArg("buddy")) {
+        strncpy(port, server->arg("buddy").c_str(), 7);
+        buddyPort = atoi(port);
+    }
+
+    if (server->hasArg("peer")) {
+        strncpy(port, server->arg("peer").c_str(), 7);
+        peerPort = atoi(port);
+    }
+
+    if (server->hasArg("group")) {
+        strncpy(port, server->arg("group").c_str(), 7);
+        groupPort = atoi(port);
+    }
+
+    savePorts();
+
+    char resp[64];
+    snprintf(resp, 63, "buddy=%d\npeer=%d\ngroup=%d\n", buddyPort, peerPort, groupPort);
+    server->send(200, "text/plain", resp);
+    gizmo.scheduleRestart();
 }
 
 void setupWebSocket() {
@@ -190,13 +222,13 @@ void handleAdvertisement() {
 
 void advertise() {
     Command ad = { .src = (uint) WiFi.localIP(), .ctx = ALL_CTX, .op = SAMPLE_ADV, .data = { [0] = silenceDetected}};
-    group.beginPacketMulticast(groupIp, GROUP_PORT, WiFi.localIP());
+    group.beginPacketMulticast(groupIp, groupPort, WiFi.localIP());
     group.write((char *) &ad, sizeof(ad));
     group.endPacket();
 
     for (int i = 0; i < MAX_PEERS; i++) {
         if (peers[i].ip && peers[i].lastHeard) {
-            peer.beginPacket(peers[i].ip, PEER_PORT);
+            peer.beginPacket(peers[i].ip, peerPort);
             peer.write((char *) &ad, sizeof(ad));
             peer.endPacket();
         }
@@ -374,7 +406,7 @@ void handleMic() {
         uint8_t oldPeerCount = peerCount;
         for (int i = 0; i < MAX_PEERS; i++) {
             if (peers[i].ip && peers[i].lastHeard >= now && peers[i].sampling) {
-                buddy.beginPacket(IPAddress(peers[i].ip), BUDDY_PORT);
+                buddy.beginPacket(IPAddress(peers[i].ip), buddyPort);
                 buddy.write((char *) &sample, sizeof(sample));
                 buddy.endPacket();
                 streams++;
@@ -403,5 +435,32 @@ void handleMic() {
                 streamCount != oldStreamCount || peerCount != oldPeerCount) {
             broadcastState();
         }
+    }
+}
+
+
+void savePorts() {
+    File f = SPIFFS.open("/ports", "w");
+    if (f) {
+        f.printf("%d|%d|%d\n", buddyPort, peerPort, groupPort);
+        f.close();
+    }
+}
+
+void loadPorts() {
+    File f = SPIFFS.open(normalizeFile("ports"), "r");
+    if (f) {
+        char num[8];
+        int l = f.readBytesUntil('|', num, 8);
+        num[l] = '\0';
+        buddyPort = atoi(num);
+
+        l = f.readBytesUntil('\n', num, 8);
+        num[l] = '\0';
+        peerPort = atoi(num);
+
+        l = f.readBytesUntil('\n', num, 8);
+        num[l] = '\0';
+        groupPort = atoi(num);
     }
 }
