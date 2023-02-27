@@ -1,5 +1,6 @@
 #include <ESPGizmoDefault.h>
 #include <WiFiUDP.h>
+#include <FastLED.h>
 #include <FS.h>
 
 #include <WebSocketsServer.h>
@@ -7,11 +8,15 @@
 
 #define FX_STREAMER     "FxStreamer"
 #define SW_UPDATE_URL   "http://iot.vachuska.com/FxStreamer.ino.bin"
-#define SW_VERSION      "2022.08.14.010"
+#define SW_VERSION      "2023.02.26.001"
 
 #define STATE      "/cfg/state"
 
 #define MIC_PIN         A0
+#define BTN_PIN         D2
+#define IND_PIN         D1
+
+CRGB indicator[1];
 
 uint8_t peerCount = 0;
 uint8_t streamCount = 0;
@@ -38,6 +43,7 @@ uint32_t nextAdvertisement = 0;
 uint32_t nextSample = 0;
 boolean sampling = false;
 boolean silenceDetected = true;
+boolean silenceMandated = false;
 
 static WebSocketsServer wsServer(81);
 
@@ -54,6 +60,7 @@ void setup() {
 //    gizmo.debugEnabled = true;
 
     setupSampler();
+    setupButtonAndIndicator();
     loadState();
     gizmo.endSetup();
 }
@@ -62,6 +69,12 @@ void loop() {
     if (gizmo.isNetworkAvailable(finishWiFiConnect)) {
         handleClients();
         handleMic();
+        handleButton();
+
+        EVERY_N_MILLIS(10) {
+            handleIndicator();
+        }
+
         handleAdvertisement();
     }
     wsServer.loop();
@@ -71,6 +84,69 @@ void finishWiFiConnect() {
     setupSync();
     advertise();
     Serial.printf("%s is ready\n", FX_STREAMER);
+}
+
+void setupButtonAndIndicator() {
+    pinMode(BTN_PIN, INPUT_PULLUP);
+    FastLED.addLeds<WS2812B, IND_PIN, GRB>(indicator, 1);  // GRB ordering is typical
+    indicator[0] = CRGB::Yellow;
+    FastLED.setBrightness(32);
+    FastLED.show();
+}
+
+
+#define SHORT_PRESS_TIME  30
+#define HOLD_DOWN_TIME  1500
+#define INDICATION_TIME 2000
+
+static uint8_t lastState = HIGH;
+static uint32_t pressedTime = 0;
+static uint32_t modeSwitchTime = 0;
+
+void handleButton() {
+    // read the state of the switch/button:
+    uint32_t currentState = digitalRead(BTN_PIN);
+    if (lastState == HIGH && currentState == LOW) {       // button is pressed
+        pressedTime = millis();
+    } else if (pressedTime && lastState == LOW && currentState == HIGH) { // button is released
+        long pressDuration = millis() - pressedTime;
+        if (pressDuration > SHORT_PRESS_TIME) {
+            silenceMandated = !silenceMandated;
+            modeSwitchTime = millis() + INDICATION_TIME;
+            broadcastState();
+        }
+        pressedTime = 0;
+
+    } else if (pressedTime && currentState == LOW && (millis() - pressedTime) > HOLD_DOWN_TIME) {
+        Serial.println("Power on/off hold-down press detected");
+        sendPowerOff();
+        pressedTime = 0;
+    }
+
+    // save the the last state
+    lastState = currentState;
+}
+
+void handleIndicator() {
+    if (pressedTime) {
+        indicator[0] = CRGB::White;
+    } else if (modeSwitchTime > millis()) {
+        indicator[0] = silenceMandated ? CRGB::Red : CRGB::Blue;
+    } else if (silenceDetected) {
+        indicator[0] = CRGB::Black;
+    } else if (silenceMandated) {
+        indicator[0] = CRGB::Red;
+    } else {
+        indicator[0] = sampling ? CRGB::Green : CRGB::Blue;
+    }
+    FastLED.show();
+}
+
+void sendPowerOff() {
+    Command cmd = {.src = (uint32_t) WiFi.localIP(), .ctx = ALL_CTX, .op = CHOP(POWER_ON_OFF), .data = {[0] = uint8_t(millis() % 256)}};
+    for (int i = 0; i < 16; i++) {
+        broadcast(cmd);
+    }
 }
 
 void setupWebSocket() {
@@ -118,7 +194,7 @@ void handleWsCommand(char *cmd) {
 void broadcastState() {
     char state[512];
     state[0] = '\0';
-    snprintf(state, 511, STATUS, minv, maxv, n1, n2, peakdelta, silenceDetected ? "true" : "false",
+    snprintf(state, 511, STATUS, minv, maxv, n1, n2, peakdelta, silenceDetected || silenceMandated ? "true" : "false",
              peerCount, streamCount, sampling ? "true" : "false", gizmo.getHostname());
     wsServer.broadcastTXT(state);
 }
@@ -149,7 +225,8 @@ void handleAdvertisement() {
 }
 
 void advertise() {
-    Command ad = { .src = (uint) WiFi.localIP(), .ctx = ALL_CTX, .op = CHOP(SAMPLE_ADV), .data = { [0] = silenceDetected}};
+    Command ad = {.src = (uint) WiFi.localIP(), .ctx = ALL_CTX, .op = CHOP(
+            SAMPLE_ADV), .data = {[0] = silenceDetected || silenceMandated}};
     group.beginPacketMulticast(groupIp, GROUP_PORT, WiFi.localIP());
     group.write((char *) &ad, sizeof(ad));
     group.endPacket();
@@ -164,7 +241,6 @@ void advertise() {
 }
 
 void addSampling(uint32_t ip, boolean refreshSampling) {
-    int ai = -1;
     int ai = -1;
     for (int i = 0; i < MAX_PEERS; i++) {
         if (ip == peers[i].ip) {
@@ -186,7 +262,7 @@ void addSampling(uint32_t ip, boolean refreshSampling) {
     }
 }
 
-void removeSampling(uint32_t  ip) {
+void removeSampling(uint32_t ip) {
     for (int i = 0; i < MAX_PEERS; i++) {
         if (ip == peers[i].ip && peers[i].sampling) {
             peers[i].sampling = false;
@@ -249,7 +325,7 @@ void setupSampler() {
     peakdelta = 16;
 }
 
-uint16_t parse(char * v, uint16_t min, uint16_t max, uint16 d) {
+uint16_t parse(char *v, uint16_t min, uint16_t max, uint16 d) {
     uint16_t n = atoi(v);
     return min <= n && n <= max ? n : d;
 }
@@ -339,7 +415,7 @@ void handleMic() {
         uint8_t oldStreamCount = streamCount;
         uint8_t oldPeerCount = peerCount;
         for (int i = 0; i < MAX_PEERS; i++) {
-            if (peers[i].ip && peers[i].lastHeard >= now && peers[i].sampling) {
+            if (!silenceMandated && peers[i].ip && peers[i].lastHeard >= now && peers[i].sampling) {
                 buddy.beginPacket(IPAddress(peers[i].ip), BUDDY_PORT);
                 buddy.write((char *) &sample, sizeof(sample));
                 buddy.endPacket();
@@ -366,7 +442,7 @@ void handleMic() {
         }
 
         if (sampling != wasSampling || silenceDetected != wasSilenceDetected ||
-                streamCount != oldStreamCount || peerCount != oldPeerCount) {
+            streamCount != oldStreamCount || peerCount != oldPeerCount) {
             broadcastState();
         }
     }
