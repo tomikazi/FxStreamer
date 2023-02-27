@@ -4,7 +4,7 @@
 #include <FS.h>
 
 #include <WebSocketsServer.h>
-#include <LampSync.h>
+#include "LampSync.h"
 
 #define FX_STREAMER     "FxStreamer"
 #define SW_UPDATE_URL   "http://iot.vachuska.com/FxStreamer.ino.bin"
