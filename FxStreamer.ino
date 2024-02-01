@@ -8,7 +8,7 @@
 
 #define FX_STREAMER     "FxStreamer"
 #define SW_UPDATE_URL   "http://iot.vachuska.com/FxStreamer.ino.bin"
-#define SW_VERSION      "2023.02.26.001"
+#define SW_VERSION      "2024.01.31.015"
 
 #define STATE      "/cfg/state"
 
@@ -23,7 +23,6 @@ uint8_t streamCount = 0;
 
 #define SAMPLE_FREQUENCY   10
 #define AD_FREQUENCY     3000
-#define HELLO_TIMEOUT   20000
 
 // For moving averages
 uint32_t mat = 0;
@@ -42,12 +41,14 @@ uint8_t n1, n2, peakdelta;
 uint32_t nextAdvertisement = 0;
 uint32_t nextSample = 0;
 boolean sampling = false;
+boolean wasSilenceDetected = false;
 boolean silenceDetected = true;
 boolean silenceMandated = false;
 
 static WebSocketsServer wsServer(81);
 
 void setup() {
+    gizmo.useMulticast = true;
     gizmo.beginSetup(FX_STREAMER, SW_VERSION, "gizmo123");
     gizmo.setUpdateURL(SW_UPDATE_URL);
 
@@ -56,8 +57,6 @@ void setup() {
     setupWebSocket();
 
     gizmo.setCallback(defaultMqttCallback);
-
-//    gizmo.debugEnabled = true;
 
     setupSampler();
     setupButtonAndIndicator();
@@ -71,7 +70,8 @@ void loop() {
         handleMic();
         handleButton();
 
-        EVERY_N_MILLIS(10) {
+        EVERY_N_MILLIS(10)
+        {
             handleIndicator();
         }
 
@@ -143,7 +143,8 @@ void handleIndicator() {
 }
 
 void sendPowerOff() {
-    Command cmd = {.src = (uint32_t) WiFi.localIP(), .ctx = ALL_CTX, .op = CHOP(POWER_ON_OFF), .data = {[0] = uint8_t(millis() % 256)}};
+    Command cmd = {.src = (uint32_t) WiFi.localIP(), .ctx = ALL_CTX, .op = CHOP(POWER_ON_OFF), .data = {[0] = uint8_t(
+            millis() % 256)}};
     for (int i = 0; i < 16; i++) {
         broadcast(cmd);
     }
@@ -230,34 +231,25 @@ void advertise() {
     group.beginPacketMulticast(groupIp, GROUP_PORT, WiFi.localIP());
     group.write((char *) &ad, sizeof(ad));
     group.endPacket();
-
-    for (int i = 0; i < MAX_PEERS; i++) {
-        if (peers[i].ip && peers[i].lastHeard) {
-            peer.beginPacket(peers[i].ip, PEER_PORT);
-            peer.write((char *) &ad, sizeof(ad));
-            peer.endPacket();
-        }
-    }
 }
 
 void addSampling(uint32_t ip, boolean refreshSampling) {
     int ai = -1;
     for (int i = 0; i < MAX_PEERS; i++) {
         if (ip == peers[i].ip) {
-            peers[i].lastHeard = millis() + HELLO_TIMEOUT;
+            peers[i].lastHeard = millis();
             peers[i].sampling = refreshSampling ? true : peers[i].sampling;
             return;
-        }
-        if (ai < 0 && !peers[i].ip) {
+        } else if (!peers[i].ip) {
             ai = i;
         }
     }
+
     if (ai >= 0) {
         peers[ai].ip = ip;
-        peers[ai].lastHeard = millis() + HELLO_TIMEOUT;
-        peers[ai].sampling = refreshSampling ? true : peers[ai].sampling;
+        peers[ai].lastHeard = millis();
+        peers[ai].sampling = refreshSampling;
         advertise();
-        gizmo.debug("Started sampling for %s", IPAddress(ip).toString().c_str());
         broadcastState();
     }
 }
@@ -266,7 +258,6 @@ void removeSampling(uint32_t ip) {
     for (int i = 0; i < MAX_PEERS; i++) {
         if (ip == peers[i].ip && peers[i].sampling) {
             peers[i].sampling = false;
-            gizmo.debug("Stopped sampling for %s", IPAddress(ip).toString().c_str());
             broadcastState();
             return;
         }
@@ -275,21 +266,17 @@ void removeSampling(uint32_t ip) {
 
 
 void handleClients() {
+    EVERY_N_SECONDS(1)
+    {
+        prunePeers();
+    }
+
     Command command;
     while (group.parsePacket()) {
         int len = group.read((char *) &command, sizeof(command));
         if (len < 0) {
             gizmo.debug("Unable to read command!!!!");
-        } else {
-            handleClient(command);
-        }
-    }
-
-    while (peer.parsePacket()) {
-        int len = peer.read((char *) &command, sizeof(command));
-        if (len < 0) {
-            gizmo.debug("Unable to read command!!!!");
-        } else {
+        } else if (command.src != WiFi.localIP()) {
             handleClient(command);
         }
     }
@@ -365,6 +352,40 @@ void saveState() {
     }
 }
 
+void prunePeers() {
+    uint32_t now = millis();
+    uint8_t newPeerCount = 0;
+    uint8_t newStreamCount = 0;
+
+    for (int i = 0; i < MAX_PEERS; i++) {
+        if (peers[i].ip && peers[i].lastHeard && peers[i].lastHeard + PEER_TIMEOUT < now) {
+            gizmo.debug("Lamp %s timed out", IPAddress(peers[i].ip).toString().c_str());
+            peers[i].ip = 0;
+            peers[i].lastHeard = 0;
+            peers[i].sampling = 0;
+        }
+
+        if (peers[i].ip) {
+            newPeerCount++;
+            if (!silenceMandated && peers[i].sampling) {
+                newStreamCount++;
+            }
+        }
+    }
+
+    uint8_t oldPeerCount = peerCount;
+    uint8_t oldStreamCount = streamCount;
+    boolean wasSampling = sampling;
+
+    peerCount = newPeerCount;
+    streamCount = newStreamCount;
+    sampling = newStreamCount > 0;
+
+    if (sampling != wasSampling || silenceDetected != wasSilenceDetected ||
+        streamCount != oldStreamCount || peerCount != oldPeerCount) {
+        broadcastState();
+    }
+}
 
 void handleMic() {
     if (nextSample < millis()) {
@@ -393,7 +414,7 @@ void handleMic() {
             sampleavg = av;
         }
 
-        boolean wasSilenceDetected = silenceDetected;
+        wasSilenceDetected = silenceDetected;
 
         smat = smat + av - (smat >> 11);
         silenceDetected = (smat >> 11) < (3 * minv);
@@ -402,48 +423,21 @@ void handleMic() {
         samplepeak = av > (sampleavg + peakdelta) && (av < oldsample);
         oldsample = av;
 
-        MicSample sample;
-        sample.sampleavg = sampleavg;
-        sample.samplepeak = samplepeak;
-        sample.oldsample = oldsample;
-
-        uint32_t now = millis();
-        uint8_t count = 0;
-        uint8_t streams = 0;
-        boolean active = false;
-        boolean wasSampling = sampling;
-        uint8_t oldStreamCount = streamCount;
-        uint8_t oldPeerCount = peerCount;
-        for (int i = 0; i < MAX_PEERS; i++) {
-            if (!silenceMandated && peers[i].ip && peers[i].lastHeard >= now && peers[i].sampling) {
-                buddy.beginPacket(IPAddress(peers[i].ip), BUDDY_PORT);
-                buddy.write((char *) &sample, sizeof(sample));
-                buddy.endPacket();
-                streams++;
-                active = true;
-            } else if (peers[i].lastHeard && peers[i].lastHeard < now) {
-                gizmo.debug("Lamp %s timed out", IPAddress(peers[i].ip).toString().c_str());
-                peers[i].ip = 0;
-                peers[i].lastHeard = 0;
-                peers[i].lastHeard = 0;
-                peers[i].sampling = 0;
-            }
-
-            if (peers[i].ip) {
-                count++;
-            }
-        }
-        peerCount = count;
-        streamCount = streams;
-        sampling = active;
-
+        // If we're supposed to be sampling, encode and send the sample... also log it.
         if (sampling) {
-            Serial.printf("255, %d, %d, %d, %d, %d, 470\n", av, sampleavg, baseavg, samplepeak * 200, v);
-        }
+            EVERY_N_MILLIS(50)
+            {
+                MicSample sample;
+                sample.sampleavg = sampleavg;
+                sample.samplepeak = samplepeak;
+                sample.oldsample = oldsample;
 
-        if (sampling != wasSampling || silenceDetected != wasSilenceDetected ||
-            streamCount != oldStreamCount || peerCount != oldPeerCount) {
-            broadcastState();
+                Command cmd = {.src = (uint32_t) WiFi.localIP(), .ctx = ALL_CTX, .op = CHOP(SAMPLE), .data = {[0] = 0}};
+                encodeSample(&sample, &cmd);
+                broadcast(cmd);
+            }
+
+            Serial.printf("255, %d, %d, %d, %d, %d, 470\n", av, sampleavg, baseavg, samplepeak * 200, v);
         }
     }
 }

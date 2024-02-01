@@ -11,9 +11,9 @@ typedef struct {
     uint16_t oldsample;
 } MicSample;
 
-#define PEER_TIMEOUT   20000
+#define PEER_TIMEOUT   60000
 
-#define MAX_PEERS   5
+#define MAX_PEERS   17
 typedef struct {
     uint32_t ip;
     uint32_t lastHeard;
@@ -30,8 +30,6 @@ boolean buddySilent = false;
 uint32_t buddyTimestamp = 0;
 uint32_t buddyIp = 0;
 
-boolean hadBuddyAndPeer = false;
-
 #define GROUP_MASK      0x01000
 #define FRONT_CTX       (0x0001 | GROUP_MASK)
 #define BACK_CTX        (0x0002 | GROUP_MASK)
@@ -41,6 +39,7 @@ boolean hadBuddyAndPeer = false;
 
 #define SAMPLE_REQ      100
 #define SAMPLE_ADV      101
+#define SAMPLE          102
 
 #define SYNC_REQ        200
 #define PATTERN         201
@@ -63,15 +62,9 @@ uint8_t channel = 0;
 #define OP(co)      co & OPERATION_MASK
 #define CHOP(o)     (uint16_t) (o | (channel<<12))
 
-#define BUDDY_PORT  7001
-WiFiUDP buddy;
-
-#define PEER_PORT  7003
-WiFiUDP peer;
-
 #define GROUP_PORT  7002
 WiFiUDP group;
-IPAddress groupIp(239, 0, 42, 69);
+IPAddress groupIp(224, 0, 42, 69);
 
 #define CHANNEL    "/cfg/channel"
 
@@ -97,31 +90,13 @@ void loadChannel() {
 
 void setupSync() {
     loadChannel();
-    buddy.begin(BUDDY_PORT);
-    peer.begin(PEER_PORT);
     group.beginMulticast(WiFi.localIP(), groupIp, GROUP_PORT);
-}
-
-void unicast(uint32_t ip, uint16_t port, Command command) {
-    peer.beginPacket(ip, port);
-    peer.write((char *) &command, sizeof(command));
-    peer.endPacket();
 }
 
 void broadcast(Command command) {
     group.beginPacketMulticast(groupIp, GROUP_PORT, WiFi.localIP());
     group.write((char *) &command, sizeof(command));
     group.endPacket();
-
-    if (buddyAvailable && buddyIp) {
-        unicast(buddyIp, PEER_PORT, command);
-    }
-
-    for (int i = 1; i < MAX_PEERS; i++) {
-        if (peers[i].ip && peers[i].lastHeard) {
-            unicast(peers[i].ip, PEER_PORT, command);
-        }
-    }
 }
 
 void handleChannel() {
@@ -144,7 +119,7 @@ void addPeer(uint32_t ip, char *name) {
     int ai = 0;
     for (int i = 1; i < MAX_PEERS; i++) {
         if (ip == peers[i].ip) {
-            peers[i].lastHeard = millis() + PEER_TIMEOUT;
+            peers[i].lastHeard = millis();
             return;
         } else if (!ai && !peers[i].ip) {
             ai = i;
@@ -152,7 +127,7 @@ void addPeer(uint32_t ip, char *name) {
     }
     if (ai) {
         peers[ai].ip = ip;
-        peers[ai].lastHeard = millis() + PEER_TIMEOUT;
+        peers[ai].lastHeard = millis();
         strcpy(peers[ai].name, name);
         gizmo.debug("Peer %s discovered", IPAddress(ip).toString().c_str());
     }
@@ -180,5 +155,19 @@ boolean isMaster(IPAddress ip) {
     return peers[master].ip == (uint32_t) ip;
 }
 
+void decodeSample(Command *cmd, MicSample *sample) {
+    sample->sampleavg = ((uint16_t) cmd->data[1] << 8) | cmd->data[0];
+    sample->samplepeak = ((uint16_t) cmd->data[3] << 8) | cmd->data[2];
+    sample->oldsample = ((uint16_t) cmd->data[5] << 8) | cmd->data[4];
+}
+
+void encodeSample(MicSample *sample, Command *cmd) {
+    cmd->data[0] = uint8_t(sample->sampleavg);
+    cmd->data[1] = uint8_t(sample->sampleavg >> 8);
+    cmd->data[2] = uint8_t(sample->samplepeak);
+    cmd->data[3] = uint8_t(sample->samplepeak >> 8);
+    cmd->data[4] = uint8_t(sample->oldsample);
+    cmd->data[5] = uint8_t(sample->oldsample >> 8);
+}
 
 #endif //ARDUINO_LAMPSYNC_H
