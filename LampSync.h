@@ -11,7 +11,7 @@ typedef struct {
     uint16_t oldsample;
 } MicSample;
 
-#define PEER_TIMEOUT   60000
+#define PEER_TIMEOUT   5000
 
 #define MAX_PEERS   17
 typedef struct {
@@ -26,7 +26,7 @@ uint8_t master = 0;
 
 boolean syncWithMaster = true;
 boolean buddyAvailable = false;
-boolean buddySilent = false;
+boolean buddySilent = true;
 uint32_t buddyTimestamp = 0;
 uint32_t buddyIp = 0;
 
@@ -64,7 +64,7 @@ uint8_t channel = 0;
 
 #define GROUP_PORT  7002
 WiFiUDP group;
-IPAddress groupIp(224, 0, 42, 69);
+IPAddress groupIp(224, 0, 0, 69);
 
 #define CHANNEL    "/cfg/channel"
 
@@ -120,6 +120,7 @@ void addPeer(uint32_t ip, char *name) {
     for (int i = 1; i < MAX_PEERS; i++) {
         if (ip == peers[i].ip) {
             peers[i].lastHeard = millis();
+            strcpy(peers[i].name, name);
             return;
         } else if (!ai && !peers[i].ip) {
             ai = i;

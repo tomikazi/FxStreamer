@@ -8,13 +8,16 @@
 
 #define FX_STREAMER     "FxStreamer"
 #define SW_UPDATE_URL   "http://iot.vachuska.com/FxStreamer.ino.bin"
-#define SW_VERSION      "2024.01.31.015"
+#define SW_VERSION      "2024.02.01.020"
 
 #define STATE      "/cfg/state"
 
 #define MIC_PIN         A0
 #define BTN_PIN         D2
 #define IND_PIN         D1
+
+#define ALONE_TIMEOUT  10000
+uint32_t homeAlone = 0;
 
 CRGB indicator[1];
 
@@ -48,7 +51,6 @@ boolean silenceMandated = false;
 static WebSocketsServer wsServer(81);
 
 void setup() {
-    gizmo.useMulticast = true;
     gizmo.beginSetup(FX_STREAMER, SW_VERSION, "gizmo123");
     gizmo.setUpdateURL(SW_UPDATE_URL);
 
@@ -67,6 +69,8 @@ void setup() {
 void loop() {
     if (gizmo.isNetworkAvailable(finishWiFiConnect)) {
         handleClients();
+        handleMulticastRepair();
+
         handleMic();
         handleButton();
 
@@ -93,7 +97,6 @@ void setupButtonAndIndicator() {
     FastLED.setBrightness(32);
     FastLED.show();
 }
-
 
 #define SHORT_PRESS_TIME  30
 #define HOLD_DOWN_TIME  1500
@@ -132,6 +135,8 @@ void handleIndicator() {
         indicator[0] = CRGB::White;
     } else if (modeSwitchTime > millis()) {
         indicator[0] = silenceMandated ? CRGB::Red : CRGB::Blue;
+    } else if (homeAlone) {
+        indicator[0] = CRGB::Purple;
     } else if (silenceDetected) {
         indicator[0] = CRGB::Black;
     } else if (silenceMandated) {
@@ -352,6 +357,21 @@ void saveState() {
     }
 }
 
+void handleMulticastRepair() {
+    if (!peerCount) {
+        if (!homeAlone) {
+            homeAlone = millis();
+        }
+    } else {
+        homeAlone = 0;
+    }
+
+    if (homeAlone && homeAlone + ALONE_TIMEOUT < millis()) {
+        homeAlone = 0;
+        gizmo.scheduleRestart();
+    }
+}
+
 void prunePeers() {
     uint32_t now = millis();
     uint8_t newPeerCount = 0;
@@ -384,6 +404,10 @@ void prunePeers() {
     if (sampling != wasSampling || silenceDetected != wasSilenceDetected ||
         streamCount != oldStreamCount || peerCount != oldPeerCount) {
         broadcastState();
+    }
+
+    if (oldPeerCount || homeAlone) {
+        handleMulticastRepair();
     }
 }
 
@@ -424,8 +448,8 @@ void handleMic() {
         oldsample = av;
 
         // If we're supposed to be sampling, encode and send the sample... also log it.
-        if (sampling) {
-            EVERY_N_MILLIS(50)
+        if (sampling && !silenceDetected) {
+            EVERY_N_MILLIS(25)
             {
                 MicSample sample;
                 sample.sampleavg = sampleavg;
@@ -436,8 +460,7 @@ void handleMic() {
                 encodeSample(&sample, &cmd);
                 broadcast(cmd);
             }
-
-            Serial.printf("255, %d, %d, %d, %d, %d, 470\n", av, sampleavg, baseavg, samplepeak * 200, v);
         }
+//        Serial.printf("255, %d, %d, %d, %d, %d, 470\n", av, sampleavg, baseavg, samplepeak * 200, v);
     }
 }
